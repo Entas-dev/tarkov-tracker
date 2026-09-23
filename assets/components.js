@@ -17,7 +17,7 @@ export function questBadges(q) {
   if (q.mode === 'seasonal') b.push('<span class="badge b-season">Seasonal</span>');
   if (q.faction) b.push(`<span class="badge b-fac">${q.faction}</span>`);
   if (q.edition) b.push(`<span class="badge b-ed">${q.edition}</span>`);
-  if (q.choice) b.push('<span class="badge b-choice" data-tip="Contains a choice that can lock other quests">Choice</span>');
+  if (q.choice) b.push(`<span class="badge b-choice" data-tip="${q.alts?.length ? 'Choice – alternatives: ' + attr(q.alts.join(', ')) : 'Contains a choice that can lock other quests'}">Choice</span>`);
   if (isSeasonal() && q.seasonal?.length) b.push('<span class="badge b-season" data-tip="Changed in the current season">Season change</span>');
   return b.join('');
 }

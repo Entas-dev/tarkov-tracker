@@ -141,6 +141,7 @@ export const prereqsMet = (q, p = P()) => preOf(q).every(g => groupSatisfied(g, 
 
 export function questStatus(q, p = P()) {
   if (isDone(q.name, p)) return { s: 'done', reasons: [] };
+  if (q.alts?.length && q.alts.some(a => isDone(a, p))) return { s: 'blocked', reasons: [{ k: 'alt', v: q.alts.filter(a => isDone(a, p)) }] };
   const reasons = [];
   for (const g of preOf(q)) if (!groupSatisfied(g, p)) reasons.push({ k: 'pre', g });
   if (q.minLevel && p.settings.level < q.minLevel) reasons.push({ k: 'level', v: q.minLevel });
@@ -289,6 +290,7 @@ export function shoppingList({ scope = 'all', includeCurrency = false, includeQu
     for (const n of IX.order) {
       const q = D.quests[n];
       if (!visible(q, p) || isDone(n, p)) continue;
+      if (q.alts?.some(a => isDone(a, p))) continue;
       if (scope === 'kappa' && !IX.kappa.has(n)) continue;
       if (scope === 'story') continue;
       for (const x of questNeeds(q, p, { includeOptional })) add(x.item, x.count, x.have, x.fir, { type: 'quest', name: n, count: x.count, have: x.have, fir: x.fir });
@@ -311,6 +313,7 @@ export function shoppingList({ scope = 'all', includeCurrency = false, includeQu
       for (const L of m.levels) {
         if (L.level <= built) continue;
         for (const i of L.items) {
+          if (i.optional && !includeOptional) continue;
           const have = p.hcnt[hcntKey(m.name, L.level, i.item)] || 0;
           const fir = i.fir && !isSeasonal();
           add(i.item, i.count, have, fir, { type: 'hideout', name: m.name, level: L.level, count: i.count, have, fir });

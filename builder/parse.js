@@ -180,7 +180,9 @@ export function parseQuest(title, wt, meta = {}) {
     community: meta.cats?.has?.('Community Goal Quests') || false,
     choice: meta.tpls?.has?.('Multiple choice') || false,
     hasGuide: /==\s*Guide\s*==/i.test(wt),
+    alts: [],
   };
+  if (q.choice) q.alts = links(ib.related).map(l => l.target).filter(t => t !== title);
   const kr = plain(ib.reqkappa || '');
   q.kappa = /^yes/i.test(kr) ? 'yes' : /subsequent/i.test(kr) ? 'sub' : /^no/i.test(kr) ? 'no' : null;
 
@@ -361,18 +363,22 @@ export function parseHideout(wt) {
     let head = null;
     for (const r of tb.rows.slice(1)) {
       const cells = r.map(c => plain(c.raw));
-      if (cells.some(c => /^requirements$/i.test(c))) { head = cells.map(c => c.toLowerCase()); continue; }
+      if (cells.some(c => /^requirements/i.test(c))) { head = cells.map(c => c.toLowerCase()); continue; }
       if (!head) continue;
       const lvl = num(cells[0]);
       if (lvl == null) continue;
       const ri = head.findIndex(h => /requirement/.test(h)), fi = head.findIndex(h => /function/.test(h)), ti = head.findIndex(h => /time/.test(h));
       const reqRaw = r[ri]?.raw || '';
       const L = { level: lvl, items: [], modules: [], traders: [], skills: [], other: [], functionsHtml: [], time: cells[ti] || '' };
+      let optionalTask = false;
       for (const n of bulletTree(reqRaw)) {
         if (n.text) { if (plain(n.raw)) L.other.push(inlineHtml(n.raw)); continue; }
         const t = plain(n.raw);
         const lk = links(n.raw);
         let m;
+        if (/^optional task/i.test(t)) { optionalTask = true; L.other.push(inlineHtml(n.raw)); continue; }
+        if (optionalTask && !lk.length) { L.other.push(inlineHtml(n.raw)); continue; }
+        if (lk.length === 1 && lk[0].target !== 'Hideout' && !/^[\d,]+/.test(t) && (m = t.match(/level\s+(\d+)/i)) && !/loyalty/i.test(t)) { L.skills.push({ name: lk[0].target, level: +m[1] }); continue; }
         if (lk.some(l => l.target === 'Hideout' && /modules/i.test(l.anchor)) || (lk[0]?.target === 'Hideout')) {
           const lbl = lk.find(l => l.target === 'Hideout')?.label || '';
           m = t.match(/level\s+(\d+)/i);
@@ -383,10 +389,10 @@ export function parseHideout(wt) {
           L.skills.push({ name: lk[0].target, level: +m[1] });
         } else if (lk.length && (m = t.match(/^([\d,]+)\s*(?:x|×)?\s*/i))) {
           const item = lk.find(l => !FIR_TARGETS.has(l.target));
-          L.items.push({ item: item?.target, label: item?.label, count: num(m[1]), fir: lk.some(l => FIR_TARGETS.has(l.target)) || /found in raid/i.test(t) });
+          L.items.push({ item: item?.target, label: item?.label, count: num(m[1]), fir: lk.some(l => FIR_TARGETS.has(l.target)) || /found in raid/i.test(t), optional: optionalTask || undefined });
         } else if (lk.length && /^\[\[/.test(n.raw.trim())) {
           const item = lk[0];
-          L.items.push({ item: item.target, label: item.label, count: 1, fir: /in raid/i.test(t) });
+          L.items.push({ item: item.target, label: item.label, count: 1, fir: /in raid/i.test(t), optional: optionalTask || undefined });
         } else L.other.push(inlineHtml(n.raw));
       }
       for (const n of bulletTree(r[fi]?.raw || '')) L.functionsHtml.push(inlineHtml(n.raw));

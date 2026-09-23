@@ -60,7 +60,7 @@ export function itemChip(item, { count = null, have = null, fir = false, counter
 export function fmt(n) { if (n == null) return ''; return n >= 10000 ? n.toLocaleString('en-US') : String(n); }
 
 export function statusBadge(s) {
-  return { done: `<span class="badge b-done">${icon('check')}Done</span>`, available: `<span class="badge b-av">Available</span>`, locked: `<span class="badge b-lock">${icon('lock')}Locked</span>` }[s] || '';
+  return { done: `<span class="badge b-done">${icon('check')}Done</span>`, available: `<span class="badge b-av">Available</span>`, locked: `<span class="badge b-lock">${icon('lock')}Locked</span>`, blocked: `<span class="badge b-muted" data-tip="You picked another option of this choice">Other choice taken</span>` }[s] || '';
 }
 
 export function progressBar(done, total, label = '') {

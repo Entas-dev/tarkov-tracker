@@ -91,7 +91,7 @@ function applyFilters(names, prefix, statusDefault = 'open') {
     if (f.map && !Q.allMaps.includes(f.map)) return false;
     if (f.kappa && !IX.kappa.has(n)) return false;
     const s = questStatus(Q, p).s;
-    if (st === 'open' && s === 'done') return false;
+    if (st === 'open' && (s === 'done' || s === 'blocked')) return false;
     if (st !== 'open' && st !== 'all' && s !== st) return false;
     if (q) {
       const hay = (n + ' ' + (Q.trader || '') + ' ' + Q.allMaps.join(' ') + ' ' + Q.objectives.map(o => o.text).join(' ') + ' ' + (Q.needs || []).map(x => x.item).join(' ')).toLowerCase();

@@ -7,7 +7,7 @@ import {
 } from './parse.js';
 
 export const DATASET_VERSION = 1;
-const CURRENCIES = new Set(['Roubles', 'Dollars', 'Euros', 'GP coin', 'TarCoin', 'BTC', 'Physical Bitcoin']);
+const CURRENCIES = new Set(['Roubles', 'Dollars', 'Euros', 'GP coin', 'TarCoin']);
 const MONEY = new Set(['Roubles', 'Dollars', 'Euros']);
 const NEVER_ITEM = new Set(['Found in raid', 'EXP', 'Scavs', 'PMC', 'Hideout', 'Flea Market', 'Escape from Tarkov', 'Loot', 'Weapons', 'Quests']);
 
@@ -141,7 +141,7 @@ export async function buildDataset({ wiki = new Wiki(), log = console.log, progr
       if (!k) continue;
       r.item = k;
       const n = needs[k];
-      if (n) { if (r.amount && /hand ?over|required|find/i.test(r.req)) n.count = Math.max(n.count, r.amount); if (r.fir === true) n.fir = true; }
+      if (n) { if (r.amount && /hand ?over|required|find/i.test(r.req)) n.count = Math.max(n.count, r.amount); if (r.fir === true) n.fir = true; if (/required|hand ?over/i.test(r.req) && !/optional/i.test(r.req)) n.optional = false; }
       else if (/required/i.test(r.req) && !/optional/i.test(r.req)) needs[k] = { item: k, count: r.amount || 1, fir: r.fir === true, optional: false, objectives: [], key: /key|keycard/i.test(items[k].type || '') };
     }
     q.needs = Object.values(needs);
@@ -150,7 +150,17 @@ export async function buildDataset({ wiki = new Wiki(), log = console.log, progr
   step(0.7, 'Resolving objectives and item requirements');
   for (const q of Object.values(quests)) { q.objectives.forEach(resolveObjective); computeNeeds(q); q.maps = q.maps.map(m => cls[m]?.canonical || m); }
   for (const c of Object.values(chapters)) { c.objectives.forEach(resolveObjective); computeNeeds(c); }
-  for (const m of hideout.modules) for (const L of m.levels) for (const i of L.items) { const k = regItem(i.item) || i.item; i.item = k; if (!items[k]) items[k] = { name: k, icon: null, currency: MONEY.has(k) }; }
+  for (const m of hideout.modules) for (const L of m.levels) {
+    const keep = [];
+    for (const i of L.items) {
+      const c = cls[i.item];
+      if (c && c.kind !== 'item' && c.kind !== 'missing') { L.skills.push({ name: c.canonical || i.item, level: i.count || 1 }); continue; }
+      const k = regItem(i.item) || i.item; i.item = k;
+      if (!items[k]) items[k] = { name: k, icon: null, currency: MONEY.has(k) };
+      keep.push(i);
+    }
+    L.items = keep;
+  }
   for (const d of battlepass.docTypes) { regItem(d.name); d.maps = d.maps.map(m => cls[m]?.canonical || m); }
   for (const l of battlepass.levels) if (l.link && cls[l.link]?.kind === 'item') l.item = regItem(l.link);
 

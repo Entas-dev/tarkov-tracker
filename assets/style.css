@@ -141,6 +141,7 @@ details summary { cursor: pointer; color: var(--accent); font-family: var(--font
 .qcard.qs-available { border-left-color: var(--warn); }
 .qcard.qs-done, .chcard.is-done { border-left-color: var(--ok); opacity: .78; }
 .qcard.qs-locked { border-left-color: var(--line); }
+.qcard.qs-blocked { opacity: .5; border-left-style: dotted; }
 .qcard.open, .chcard.open { opacity: 1; }
 .qc-head { display: flex; align-items: center; gap: 10px; padding: 8px 10px; }
 .qc-main { flex: 1; min-width: 0; cursor: pointer; }
