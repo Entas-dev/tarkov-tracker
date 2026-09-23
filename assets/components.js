@@ -1,5 +1,5 @@
 // Quest cards, objective lists, info drawer
-import { D, IX, P, visible, questStatus, isDone, questNeeds, questObjProgress, objDone, cntKey, isSeasonal, preOf, traderLL } from './model.js';
+import { D, IX, P, visible, condStatus, questStatus, isDone, questNeeds, questObjProgress, objDone, cntKey, isSeasonal, preOf, traderLL } from './model.js';
 import { esc, attr, icon, img, traderImg, qlink, itemChip, statusBadge, wikiHref, wikiSectionHtml, fmt, progressBar } from './ui.js';
 
 export const expanded = new Set();
@@ -29,6 +29,7 @@ export function objectiveRows(q, { chapter = false, ending = null } = {}) {
   const rows = [];
   for (const o of q.objectives) {
     if (chapter && ending && o.endings && !o.endings.includes(ending)) continue;
+    if (chapter && condStatus(o.cond, p) === false) continue;
     if (chapter && o.section !== lastSec) { lastSec = o.section; if (o.section) rows.push(`<li class="obj-sec">${o.section.replace(/\s*$/, '')}</li>`); lastCond = null; }
     if (o.cond && o.cond !== lastCond) { rows.push(`<li class="obj-cond">${o.cond}</li>`); lastCond = o.cond; }
     const key = chapter ? `${q.name}|${o.id}` : `${q.name}|${o.id}`;
@@ -44,7 +45,7 @@ export function objectiveRows(q, { chapter = false, ending = null } = {}) {
 
 export function needsBlock(q, { chapter = false, ending = null } = {}) {
   const p = P();
-  const visObj = (id) => { const o = q.objectives.find(x => x.id === id); return !ending || !o?.endings || o.endings.includes(ending); };
+  const visObj = (id) => { const o = q.objectives.find(x => x.id === id); return (!ending || !o?.endings || o.endings.includes(ending)) && (!o || condStatus(o.cond, p) !== false); };
   const needs = chapter ? (q.needs || []).filter(n => !n.objectives?.length || n.objectives.some(visObj)).map(n => ({ ...n, have: p.cnt[`ch:${q.name}|${n.item}`] || 0 })) : questNeeds(q, p, { includeOptional: true });
   if (!needs.length) return '';
   return `<div class="needs"><div class="sub-h">Items</div><div class="chips">${needs.map(n => itemChip(n.item, { count: n.count, have: n.have, fir: n.fir, optional: n.optional, counter: (chapter ? 'ch:' : '') + cntKey(q.name, n.item) })).join('')}</div></div>`;

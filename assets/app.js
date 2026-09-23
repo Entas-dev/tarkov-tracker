@@ -1,6 +1,6 @@
 // App bootstrap, header, routing, global actions
 import { store, PROFILES } from './store.js';
-import { D, IX, setDataset, P, visible, isDone, completeQuest, prerequisiteClosure, doneDependents, uncompleteQuests, questObjProgress, objKey, chapterClosure, chDone, chapterProgress, hLevel, setModuleLevel, hideoutDependents, objVisibleForEnding, questStatus } from './model.js';
+import { D, IX, setDataset, P, visible, isDone, completeQuest, prerequisiteClosure, doneDependents, uncompleteQuests, questObjProgress, objKey, chapterClosure, chDone, chapterProgress, hLevel, setModuleLevel, hideoutDependents, objVisibleForEnding, objApplies, condStatus, questStatus } from './model.js';
 import { esc, attr, icon, img, initTooltips, hideTip, confirmDialog, toast, $, $$ } from './ui.js';
 import { expanded, openQuestInfo, openChapterInfo, openItemInfo, openWikiPage, openModuleInfo, closeDrawer } from './components.js';
 import { renderStory, renderKappa, renderTraders, renderQuests } from './tabs-quests.js';
@@ -189,7 +189,13 @@ function toggleChObj(cname, oid) {
   const ending = P().settings.ending;
   const idx = c.objectives.findIndex(x => x.id === oid);
   const o = c.objectives[idx];
-  const prev = c.objectives.slice(0, idx).filter(x => !x.optional && objVisibleForEnding(x, ending) && (!isBranchCond(x.cond) || x.cond === o.cond || (x.parent && x.parent === o.parent)));
+  // checking a step inside a branch tells us which choice you made
+  const ct = (o.cond || '').replace(/<[^>]+>/g, '');
+  const infer = {};
+  if (/^(if|only if)\b/i.test(ct) && /armored case/i.test(ct) && !/\bor\b/i.test(ct)) infer.armoredCase = /\b(gave|given)\b/i.test(ct) ? 'gave' : 'kept';
+  if (/^if\b/i.test(ct) && /major evidence/i.test(ct)) infer.evidence = /failed/i.test(ct) ? 'failed' : 'received';
+  if (Object.keys(infer).length) store.update(p => { p.settings.choices = { ...(p.settings.choices || {}), ...infer }; });
+  const prev = c.objectives.slice(0, idx).filter(x => !x.optional && objApplies(x) && (!isBranchCond(x.cond) || x.cond === o.cond || condStatus(x.cond) === true || (x.parent && x.parent === o.parent)));
   const ids = [oid, ...prev.map(x => x.id), ...descendants(c.objectives, oid)];
   const chs = [...chapterClosure(cname)].filter(n => !chDone(n));
   store.update(p => { for (const id of ids) p.chObj[`${cname}|${id}`] = 1; for (const n of chs) p.ch[n] = 1; });
@@ -294,6 +300,7 @@ function onClick(e) {
     case 'chapter': toggleChapter(b.dataset.c); break;
     case 'chobj': toggleChObj(b.dataset.q, b.dataset.o); break;
     case 'ending': store.update(pp => { pp.settings.ending = b.dataset.e; }); break;
+    case 'choice': store.update(pp => { pp.settings.choices = { ...(pp.settings.choices || {}), [b.dataset.k]: pp.settings.choices?.[b.dataset.k] === b.dataset.v ? undefined : b.dataset.v }; }); break;
     case 'expand': { const k = b.dataset.q; expanded.has(k) ? expanded.delete(k) : expanded.add(k); render(); break; }
     case 'expand-ch': { const k = 'ch:' + b.dataset.c; expanded.has(k) ? expanded.delete(k) : expanded.add(k); render(); break; }
     case 'expand-h': { const k = 'h:' + b.dataset.m; expanded.has(k) ? expanded.delete(k) : expanded.add(k); render(); break; }

@@ -1,6 +1,6 @@
 // Story, Kappa, Traders, All quests tabs
 import { store } from './store.js';
-import { D, IX, P, ENDINGS, visible, questStatus, isDone, chDone, chapterProgress, chapterClosure, traderLL, questNeeds, isSeasonal } from './model.js';
+import { D, IX, P, ENDINGS, condStatus, visible, questStatus, isDone, chDone, chapterProgress, chapterClosure, traderLL, questNeeds, isSeasonal } from './model.js';
 import { esc, attr, icon, img, traderImg, qlink, itemChip, progressBar, fmt, statusBadge } from './ui.js';
 import { questCard, objectiveRows, needsBlock, mapChips, expanded } from './components.js';
 import { perksNotesHtml } from './perks.js';
@@ -29,10 +29,19 @@ export function renderStory(root) {
     ${ENDINGS.map(n => `<button class="ending ${n === ending ? 'on' : ''}" role="radio" aria-checked="${n === ending}" data-act="ending" data-e="${n}">${img(E[n]?.img, n, 'ending-ic')}<span>${n}</span></button>`).join('')}
     ${D.endings?.flowchartImg ? `<a class="btn" href="${attr(D.endings.flowchartImg.replace(/\/scale-to-width-down\/\d+/, ''))}" target="_blank" rel="noopener">${icon('ext')} Endings flowchart</a>` : ''}
   </div>
+  <div class="choices"><span class="perk-lbl">Your story choices</span>
+    ${choiceSeg('armoredCase', 'Armored case (Falling Skies)', [['gave', 'Gave it to Prapor'], ['kept', 'Kept it']])}
+    ${choiceSeg('evidence', 'Major evidence (They Are Already Here)', [['received', 'Received'], ['failed', 'Failed']])}
+    <span class="small muted">Used to hide the branches you did not take and to auto-check earlier steps correctly.</span></div>
   ${e ? `<div class="ending-card"><div class="ending-quote">${e.quoteHtml}</div>${e.rewardsHtml?.length ? `<details><summary>${esc(ending)} rewards</summary><ul>${e.rewardsHtml.map(r => `<li>${r}</li>`).join('')}</ul></details>` : ''}</div>` : ''}
   <div class="chapters">
     ${order.map(n => chapterCard(D.chapters[n], required.has(n), ending)).join('')}
   </div>`;
+}
+
+function choiceSeg(k, label, opts) {
+  const cur = P().settings.choices?.[k];
+  return `<span class="choice"><span class="small">${esc(label)}:</span><span class="seg">${opts.map(([v, l]) => `<button class="seg-b ${cur === v ? 'on' : ''}" data-act="choice" data-k="${k}" data-v="${v}" aria-pressed="${cur === v}">${esc(l)}</button>`).join('')}</span></span>`;
 }
 
 function chapterCard(c, required, ending) {
@@ -40,7 +49,7 @@ function chapterCard(c, required, ending) {
   const done = chDone(c.name, p);
   const pr = chapterProgress(c, p);
   const open = expanded.has('ch:' + c.name);
-  const others = c.objectives.filter(o => o.endings && !o.endings.includes(ending)).length;
+  const others = c.objectives.filter(o => (o.endings && !o.endings.includes(ending)) || condStatus(o.cond, p) === false).length;
   const endRew = c.endingRewards?.[ending];
   return `<article class="chcard ${done ? 'is-done' : ''} ${required ? '' : 'ch-opt'} ${open ? 'open' : ''}">
     <div class="qc-head">

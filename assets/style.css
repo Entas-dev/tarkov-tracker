@@ -212,6 +212,9 @@ a.wl:hover { border-bottom-style: solid; }
 .ending { display: flex; align-items: center; gap: 8px; padding: 6px 14px 6px 6px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); cursor: pointer; font-family: var(--font-h); font-size: 18px; text-transform: uppercase; font-weight: 600; letter-spacing: .04em; }
 .ending.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, var(--panel)); color: var(--head); }
 .ending-ic { width: 40px; height: 40px; object-fit: contain; }
+.choices { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-bottom: 10px; padding: 8px 10px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
+.choice { display: inline-flex; align-items: center; gap: 6px; }
+.choice .seg-b { min-height: 28px; padding: 3px 10px; font-size: 13px; }
 .ending-card { background: var(--panel); border: 1px solid var(--line); padding: 10px 14px; margin-bottom: 16px; border-radius: var(--radius); }
 .ending-quote { color: var(--muted); font-style: italic; }
 .chapters { display: grid; gap: 8px; }

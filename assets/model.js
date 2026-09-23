@@ -287,9 +287,34 @@ export function chapterClosure(name) {
   return out;
 }
 export function objVisibleForEnding(o, ending) { return !o.endings || o.endings.includes(ending); }
+
+// Story branch conditions ("If you kept the Armored case…") evaluated against the player's choices / progress.
+// Returns true (applies), false (not your path) or null (unknown).
+const condText = (c) => String(c || '').replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').trim();
+const condLinks = (c) => [...String(c || '').matchAll(/data-t="([^"]+)"/g)].map(m => m[1].replace(/&amp;/g, '&'));
+const doneAny = (n, p) => (D.quests[n] ? isDone(n, p) : D.chapters[n] ? !!p.ch[n] : null);
+export function condStatus(cond, p = P()) {
+  const t = condText(cond);
+  if (!t || !/^(if|only if)\b/i.test(t)) return true; // stage headings ("Once…", "After…") are not branches
+  const ch = p.settings.choices || {};
+  if (/armored case/i.test(t) && !/\bor\b/i.test(t)) {
+    const gave = /\b(gave|given)\b/i.test(t);
+    if (!ch.armoredCase) return null;
+    return gave ? ch.armoredCase === 'gave' : ch.armoredCase === 'kept';
+  }
+  if (/major evidence/i.test(t)) {
+    if (!ch.evidence) return null;
+    return /failed/i.test(t) ? ch.evidence === 'failed' : ch.evidence === 'received';
+  }
+  const ls = condLinks(cond).filter(n => D.quests[n] || D.chapters[n]);
+  if (ls.length && /have not completed/i.test(t)) return ls.every(n => doneAny(n, p) === false);
+  if (ls.length && /have completed/i.test(t)) return ls.some(n => doneAny(n, p) === true);
+  return null;
+}
+export function objApplies(o, p = P()) { return objVisibleForEnding(o, p.settings.ending) && condStatus(o.cond, p) !== false; }
 export function chapterProgress(c, p = P()) {
   const end = p.settings.ending;
-  const req = c.objectives.filter(o => !o.optional && (o.depth || 1) === 1 && objVisibleForEnding(o, end));
+  const req = c.objectives.filter(o => !o.optional && (o.depth || 1) === 1 && objVisibleForEnding(o, end) && condStatus(o.cond, p) !== false);
   const done = req.filter(o => chDone(c.name, p) || p.chObj[`${c.name}|${o.id}`]).length;
   return { done, total: req.length };
 }
@@ -322,7 +347,7 @@ export function shoppingList({ scope = 'all', includeCurrency = false, includeQu
       for (const x of c.needs || []) {
         if (x.optional && !includeOptional) continue;
         const o = c.objectives.find(o => x.objectives.includes(o.id));
-        if (o && !objVisibleForEnding(o, p.settings.ending)) continue;
+        if (o && !objApplies(o, p)) continue;
         add(x.item, x.count, 0, x.fir, { type: 'chapter', name: c.name, count: x.count, have: 0, fir: x.fir });
       }
     }
