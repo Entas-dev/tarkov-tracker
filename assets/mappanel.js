@@ -3,17 +3,16 @@
 import { store } from './store.js';
 import { D, IX, P, visible, questStatus, isDone, objDone } from './model.js';
 import { esc, attr, icon, img, itemChip, traderImg } from './ui.js';
-import { idbGet, idbSet } from './data.js';
-import { fetchTarkovDev, fetchMapLoot } from '../builder/tarkovdev.js';
 
 const LEAFLET_JS = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js';
 const LEAFLET_CSS = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css';
 
 let panel, mapEl, listEl, leafletMap, L, mapCfgs = null, curKey = null, markerLayer = null, extractLayer = null, focusQuest = null;
-let tdev = null; // {tasks, maps, fetchedAt, gameMode}
-let tdevState = 'idle';
-const lootCache = {}; // key -> {loot, locks} | 'loading' | 'failed'
+let md = null; // marker snapshot {tasks, maps, fetchedAt, gameMode} built daily from json.tarkov.dev
+let mdState = 'idle';
 let lootLayer = null;
+const MAP_ALIAS = { 'ground-zero-21': 'ground-zero', 'ground-zero-tutorial': 'ground-zero', 'night-factory': 'factory', 'the-lab-dark': 'the-lab' };
+const mapIs = (m, cfg) => (MAP_ALIAS[m] || m) === cfg.normalizedName;
 
 const WIKI_TO_KEY = (name) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -53,7 +52,7 @@ export function initMapPanel() {
   panel.querySelector('[data-mp="extracts"]').addEventListener('change', () => drawMarkers());
   panel.querySelector('[data-mp="loot"]').addEventListener('change', () => drawMarkers());
   store.on((reason) => {
-    if (reason === 'profile' && initP && tdev?.gameMode !== store.profile.gameMode) { tdev = null; loadTarkovDev(); }
+    if (reason === 'profile' && initP && md?.gameMode !== store.profile.gameMode) { md = null; loadMarkers(); }
     if (!panel.classList.contains('collapsed')) { renderList(); drawMarkers(); }
   });
 }
@@ -94,7 +93,7 @@ function ensureInit() {
     mapCfgs = await fetch('data/maps.json').then(r => r.json());
     const sel = panel.querySelector('.mp-select');
     sel.innerHTML = mapCfgs.map(m => `<option value="${m.key}">${esc(displayName(m.key))}</option>`).join('');
-    loadTarkovDev();
+    loadMarkers();
   })();
   return initP;
 }
@@ -103,34 +102,26 @@ const NAMES = { 'streets-of-tarkov': 'Streets of Tarkov', 'ground-zero': 'Ground
 const displayName = (k) => NAMES[k] || k.replace(/(^|-)([a-z])/g, (m, a, b) => (a ? ' ' : '') + b.toUpperCase());
 const wikiNameFor = (k) => { const d = displayName(k); return IX.maps.find(m => norm(m) === norm(d)) || d; };
 
-// ---------- tarkov.dev positions ----------
-async function loadTarkovDev() {
+// ---------- marker data (snapshot of tarkov.dev's static exports, refreshed daily by the GitHub Action) ----------
+async function loadMarkers() {
   const gm = store.profile.gameMode;
-  const key = 'tdev-' + gm;
-  const cached = await idbGet(key);
-  if (cached) { tdev = cached; tdevState = 'cached'; }
-  setStatus();
-  if (cached && Date.now() - cached.fetchedAt < 6 * 3600e3) return;
-  tdevState = tdev ? 'refreshing' : 'loading'; setStatus();
+  mdState = 'loading'; setStatus();
   try {
-    tdev = await fetchTarkovDev(gm);
-    idbSet(key, tdev);
-    tdevState = 'live';
-  } catch (e) {
-    // fall back to snapshot shipped with the site (written by the daily GitHub Action)
-    try {
-      const snap = await fetch(`data/tarkovdev-${gm}.json`, { cache: 'no-cache' }).then(r => (r.ok ? r.json() : null));
-      if (snap?.tasks) { tdev = snap; tdevState = 'snapshot'; } else if (!tdev) tdevState = 'down';
-    } catch { if (!tdev) tdevState = 'down'; }
-    console.warn('tarkov.dev unavailable:', e.message);
-  }
+    const r = await fetch(`data/mapdata-${gm}.json`, { cache: 'no-cache' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    md = await r.json();
+    mdState = 'ok';
+  } catch (e) { md = null; mdState = 'missing'; console.warn('map markers unavailable', e); }
   setStatus();
+  renderList();
   drawMarkers();
 }
 function setStatus() {
   const s = panel.querySelector('.mp-status');
-  const txt = { idle: '', loading: 'Loading markers…', refreshing: '', cached: '', live: '', snapshot: 'Markers from snapshot', down: 'Marker data unavailable (tarkov.dev down) – map & quest list still work' }[tdevState] || '';
-  s.textContent = txt;
+  if (mdState === 'loading') s.textContent = 'Loading markers…';
+  else if (mdState === 'missing') s.textContent = 'Marker data not available yet – map & quest list still work';
+  else if (mdState === 'ok') { const h = Math.round((Date.now() - md.fetchedAt) / 3600e3); s.textContent = `Markers: tarkov.dev data, ${h < 1 ? 'just updated' : h + ' h old'}`; }
+  else s.textContent = '';
 }
 
 // ---------- map rendering ----------
@@ -181,7 +172,6 @@ async function showMap(key) {
   markerLayer = L.layerGroup().addTo(leafletMap);
   extractLayer = L.layerGroup().addTo(leafletMap);
   lootLayer = L.layerGroup().addTo(leafletMap);
-  loadLoot(cfg);
   renderList();
   drawMarkers(true);
 }
@@ -214,41 +204,24 @@ function renderList() {
   }).join('') || '<div class="empty small">No available quests on this map for your current progress.</div>');
 }
 
-function tdevTask(name) {
-  if (!tdev) return null;
-  const k = norm(name);
-  return tdev.tasks.find(t => norm(t.name) === k) || null;
+function mdTask(name) {
+  if (!md) return null;
+  return md.tasks.find(t => t.wiki === name) || md.tasks.find(t => norm(t.name) === norm(name)) || null;
 }
 function hasMarkers(name) {
-  const t = tdevTask(name);
+  const t = mdTask(name);
   if (!t) return false;
   const cfg = mapCfgs.find(m => m.key === curKey);
-  return t.objectives.some(o => (o.zones || []).some(z => z.map?.normalizedName === cfg.normalizedName) || (o.possibleLocations || []).some(l => l.map?.normalizedName === cfg.normalizedName));
+  return t.objectives.some(o => o.zones.some(z => mapIs(z.map, cfg)) || o.locs.some(l => mapIs(l.map, cfg)));
 }
 
-async function loadLoot(cfg) {
-  const gm = store.profile.gameMode;
-  const key = `loot-${gm}-${cfg.normalizedName}`;
-  if (lootCache[key]) return;
-  lootCache[key] = 'loading';
-  const cached = await idbGet(key);
-  if (cached && Date.now() - cached.fetchedAt < 24 * 3600e3) { lootCache[key] = cached; drawMarkers(); return; }
-  try {
-    const d = await fetchMapLoot(gm, displayName(cfg.key));
-    lootCache[key] = d; idbSet(key, d);
-  } catch (e) { lootCache[key] = cached || 'failed'; }
-  drawMarkers();
-}
-
-function neededItemsHere(names) {
-  const p = P();
-  const items = new Set(), keys = new Set();
+function neededHere(names) {
+  const items = new Map(), keys = new Map(); // node id -> item name
   for (const n of names) {
-    const q = D.quests[n];
-    for (const x of q.needs || []) {
+    for (const x of D.quests[n].needs || []) {
       const I = D.items[x.item];
-      if (!I || I.currency) continue;
-      if (/key|keycard/i.test(I.type || '') || /key(card)?\b/i.test(x.item)) keys.add(norm(x.item)); else items.add(norm(x.item));
+      if (!I || I.currency || !I.node) continue;
+      if (/key|keycard/i.test(I.type || '') || /key(card)?\b/i.test(x.item)) keys.set(I.node, I.name); else items.set(I.node, I.name);
     }
   }
   return { items, keys };
@@ -258,53 +231,57 @@ function drawMarkers(fit = false) {
   if (!leafletMap || !markerLayer) return;
   markerLayer.clearLayers(); extractLayer.clearLayers(); lootLayer?.clearLayers();
   const cfg = mapCfgs.find(m => m.key === curKey);
-  const p = P();
   const names = activeQuestsHere();
   const pts = [];
-  if (tdev) {
+  if (md) {
     for (const n of names) {
-      const t = tdevTask(n);
+      const t = mdTask(n);
       if (!t) continue;
       const foc = focusQuest === n;
+      if (focusQuest && !foc) continue;
       for (const o of t.objectives) {
-        for (const z of o.zones || []) {
-          if (z.map?.normalizedName !== cfg.normalizedName || !z.position) continue;
-          if (z.outline?.length > 2) L.polygon(z.outline.map(pos), { color: foc ? '#f2c14e' : '#c9a227', weight: foc ? 2 : 1, fillOpacity: foc ? 0.25 : 0.1, interactive: false }).addTo(markerLayer);
-          const m = L.marker(pos(z.position), { icon: L.divIcon({ className: `mk mk-obj ${foc ? 'mk-focus' : ''}`, html: '<span></span>', iconSize: [18, 18] }) });
-          m.bindPopup(`<b>${esc(n)}</b><br>${esc(o.description)}`);
-          m.addTo(markerLayer); if (foc || !focusQuest) pts.push(pos(z.position));
+        for (const z of o.zones) {
+          if (!mapIs(z.map, cfg) || !z.p) continue;
+          if (z.o?.length > 2) L.polygon(z.o.map(pos), { color: foc ? '#f2c14e' : '#c9a227', weight: foc ? 2 : 1, fillOpacity: foc ? 0.25 : 0.1, interactive: false }).addTo(markerLayer);
+          const m = L.marker(pos(z.p), { icon: L.divIcon({ className: `mk mk-obj ${foc ? 'mk-focus' : ''}`, html: '<span></span>', iconSize: [18, 18] }) });
+          m.bindPopup(`<b>${esc(n)}</b><br>${esc(o.d)}${o.opt ? ' <i>(optional)</i>' : ''}`);
+          m.addTo(markerLayer); pts.push(pos(z.p));
         }
-        for (const loc of o.possibleLocations || []) {
-          if (loc.map?.normalizedName !== cfg.normalizedName) continue;
-          for (const ps of loc.positions || []) {
-            const m = L.marker(pos(ps), { icon: L.divIcon({ className: `mk mk-item ${foc ? 'mk-focus' : ''}`, html: o.questItem?.iconLink ? `<img src="${attr(o.questItem.iconLink)}" alt="">` : '<span></span>', iconSize: [26, 26] }) });
-            m.bindPopup(`<b>${esc(n)}</b><br>${esc(o.questItem?.name || o.description)}`);
-            m.addTo(markerLayer); if (foc || !focusQuest) pts.push(pos(ps));
+        for (const loc of o.locs) {
+          if (!mapIs(loc.map, cfg)) continue;
+          for (const ps of loc.ps) {
+            const m = L.marker(pos(ps), { icon: L.divIcon({ className: `mk mk-item ${foc ? 'mk-focus' : ''}`, html: o.qi?.i ? `<img src="${attr(o.qi.i)}" alt="">` : '<span></span>', iconSize: [26, 26] }) });
+            m.bindPopup(`<b>${esc(n)}</b><br>${esc(o.qi?.n || o.d)}<br><span class="small">${esc(o.d)}</span>`);
+            m.addTo(markerLayer); pts.push(pos(ps));
           }
         }
       }
     }
+    const mp = md.maps.filter(m => mapIs(m.map, cfg));
     if (panel.querySelector('[data-mp="extracts"]').checked) {
-      const mp = tdev.maps?.find(m => m.normalizedName === cfg.normalizedName);
-      for (const ex of mp?.extracts || []) {
-        if (!ex.position || (ex.faction && ex.faction !== 'pmc' && ex.faction !== 'shared')) continue;
-        L.marker(pos(ex.position), { icon: L.divIcon({ className: `mk mk-ex ${ex.faction === 'shared' ? 'mk-shared' : ''}`, html: `<span>${esc(ex.name)}</span>`, iconSize: null }) }).addTo(extractLayer);
+      const seen = new Set();
+      for (const m of mp) for (const ex of m.extracts) {
+        if (ex.f && ex.f !== 'pmc' && ex.f !== 'shared') continue;
+        const k = ex.n + '|' + Math.round(ex.p.x) + '|' + Math.round(ex.p.z);
+        if (seen.has(k)) continue; seen.add(k);
+        L.marker(pos(ex.p), { icon: L.divIcon({ className: `mk mk-ex ${ex.f === 'shared' ? 'mk-shared' : ''}`, html: `<span>${esc(ex.n)}</span>`, iconSize: null }) }).addTo(extractLayer);
       }
     }
-  }
-  const lc = lootCache[`loot-${store.profile.gameMode}-${cfg.normalizedName}`];
-  if (lc && typeof lc === 'object' && panel.querySelector('[data-mp="loot"]').checked) {
-    const { items, keys } = neededItemsHere(focusQuest ? [focusQuest] : names);
-    let n = 0;
-    for (const l of lc.loot) {
-      const hit = l.i.filter(x => items.has(norm(x)));
-      if (!hit.length || n > 600) continue;
-      n++;
-      L.marker(pos(l.p), { icon: L.divIcon({ className: 'mk mk-loot', html: '<span></span>', iconSize: [12, 12] }) }).bindPopup(`<b>Item spawn</b><br>${hit.map(esc).join('<br>')}`).addTo(lootLayer);
-    }
-    for (const k of lc.locks) {
-      if (!keys.has(norm(k.k))) continue;
-      L.marker(pos(k.p), { icon: L.divIcon({ className: 'mk mk-lock', html: `<span>${icon('lock')}</span>`, iconSize: [20, 20] }) }).bindPopup(`<b>Locked door</b><br>${esc(k.k)}`).addTo(lootLayer);
+    if (panel.querySelector('[data-mp="loot"]').checked) {
+      const { items, keys } = neededHere(focusQuest ? [focusQuest] : names);
+      let cnt = 0;
+      for (const m of mp) {
+        for (const l of m.loot) {
+          const hit = l.i.filter(id => items.has(id));
+          if (!hit.length || cnt > 800) continue;
+          cnt++;
+          L.marker(pos(l.p), { icon: L.divIcon({ className: 'mk mk-loot', html: '<span></span>', iconSize: [12, 12] }) }).bindPopup(`<b>Possible spawn</b><br>${hit.map(id => esc(items.get(id))).join('<br>')}`).addTo(lootLayer);
+        }
+        for (const k of m.locks) {
+          if (!keys.has(k.k)) continue;
+          L.marker(pos(k.p), { icon: L.divIcon({ className: 'mk mk-lock', html: `<span>${icon('lock')}</span>`, iconSize: [20, 20] }) }).bindPopup(`<b>Door for</b><br>${esc(keys.get(k.k))}`).addTo(lootLayer);
+        }
+      }
     }
   }
   if (fit && focusQuest && pts.length) leafletMap.fitBounds(L.latLngBounds(pts).pad(0.3), { maxZoom: (cfg.maxZoom || 5) - 1 });
