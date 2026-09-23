@@ -318,7 +318,9 @@ a.wl:hover { border-bottom-style: solid; }
 .tt-item { width: 48px; height: 48px; object-fit: contain; }
 .tt-sec { border-top: 1px solid var(--line); padding-top: 6px; margin-top: 6px; }
 .tt-h { font-family: var(--font-h); text-transform: uppercase; color: var(--accent); font-weight: 600; margin-bottom: 2px; }
-.tt-row { display: flex; gap: 6px; align-items: baseline; margin: 2px 0; }
+.tt-row { margin: 2px 0; }
+.tt-req { display: flex; gap: 6px; align-items: baseline; }
+.tt-req > span:first-child { flex: none; }
 .t-ok { color: var(--ok); } .t-no { color: var(--bad); }
 .t-ok .ic, .t-no .ic { width: 13px; height: 13px; }
 .tt-seasonal { border: 1px solid var(--season); padding: 4px 6px; margin-top: 6px; color: var(--season); }

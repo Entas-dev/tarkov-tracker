@@ -89,7 +89,7 @@ export function questTooltip(name) {
   const pr = questObjProgress(q, p);
   const seas = isSeasonal() && q.seasonal?.length ? `<div class="tt-seasonal">${q.seasonal.map(s => `<div>${s.html}</div>`).join('')}</div>` : '';
   return `<div class="tt-head">${traderImg(q.trader, 'tt-tr')}<div><div class="tt-title">${esc(q.name)}</div><div class="tt-sub">${esc(q.trader || '')}${q.allMaps.length ? ' · ' + esc(q.allMaps.join(', ')) : ''}</div></div>${statusBadge(st.s)}</div>
-  <div class="tt-sec"><div class="tt-h">Requirements</div>${rows.length ? rows.map(r => `<div class="tt-row">${r}</div>`).join('') : '<div class="muted">None</div>'}</div>
+  <div class="tt-sec"><div class="tt-h">Requirements</div>${rows.length ? rows.map(r => `<div class="tt-row tt-req">${r.replace(/^(<span class="t-(?:ok|no|dot)">[\s\S]*?<\/span>)\s*([\s\S]*)$/, '$1<span>$2</span>')}</div>`).join('') : '<div class="muted">None</div>'}</div>
   <div class="tt-sec"><div class="tt-h">Objectives <span class="muted">${pr.done}/${pr.total}</span></div>${q.objectives.filter(o => (o.depth || 1) === 1).slice(0, 8).map(o => `<div class="tt-row">${o.optional ? '<span class="muted">(opt)</span> ' : ''}${o.html}</div>`).join('')}${q.objectives.filter(o => (o.depth || 1) === 1).length > 8 ? '<div class="muted">…</div>' : ''}</div>
   ${needs.length ? `<div class="tt-sec"><div class="tt-h">Items</div><div class="chips">${needs.map(n => itemChip(n.item, { count: n.count, fir: n.fir, small: true })).join('')}</div></div>` : ''}
   ${seas}

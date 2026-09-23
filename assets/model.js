@@ -158,7 +158,11 @@ export function prerequisiteClosure(name, p = P()) {
     for (const g of preOf(q)) {
       const vis = g.filter(a => visible(D.quests[a.q], p));
       const comp = vis.filter(a => a.type === 'complete');
-      if (!comp.length) continue;
+      if (!comp.length) {
+        // "accept X" prerequisite: X itself need not be finished, but X's own prerequisites must be
+        if (vis.length === 1 && vis[0].type === 'accept') walk(vis[0].q);
+        continue;
+      }
       if (comp.length === 1 && vis.length === 1) { const m = comp[0].q; if (!out.has(m)) { out.add(m); walk(m); } }
       else if (comp.some(a => isDone(a.q, p) || out.has(a.q))) { /* already satisfied */ }
     }

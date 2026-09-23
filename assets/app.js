@@ -91,6 +91,7 @@ function render() {
   const main = $('#main');
   const y = window.scrollY;
   const focusSel = document.activeElement?.matches?.('input[type=search]') ? { f: document.activeElement.dataset.f || document.activeElement.dataset.af || document.activeElement.dataset.if, pos: document.activeElement.selectionStart } : null;
+  hideTip();
   tab.render(main);
   window.scrollTo(0, y);
   if (focusSel) { const el = main.querySelector(`input[type=search][data-f="${focusSel.f}"],input[type=search][data-af="${focusSel.f}"],input[type=search][data-if="${focusSel.f}"]`); if (el) { el.focus(); try { el.setSelectionRange(focusSel.pos, focusSel.pos); } catch { } } }
