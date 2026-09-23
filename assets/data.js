@@ -30,6 +30,10 @@ export async function loadDataset() {
   return cands[0] || null;
 }
 
+export async function loadGameReqs() {
+  try { const r = await fetch('data/prereq-game.json', { cache: 'no-cache' }); return r.ok ? await r.json() : null; } catch { return null; }
+}
+
 export const STALE_MS = 24 * 3600e3;
 export const isStale = (ds) => age(ds) > STALE_MS;
 

@@ -2,14 +2,35 @@
 // Built daily by the GitHub Action into data/mapdata-<gameMode>.json, so the site never depends on the live GraphQL API.
 export const JSON_BASE = 'https://json.tarkov.dev';
 
-export async function buildMapData({ gameMode = 'regular', neededNodes = null, fetchFn = globalThis.fetch } = {}) {
+export async function fetchTarkovJson(gameMode = 'regular', fetchFn = globalThis.fetch) {
   const get = async (n) => {
     const r = await fetchFn(`${JSON_BASE}/${gameMode}/${n}`);
     if (!r.ok) throw new Error(`json.tarkov.dev ${gameMode}/${n}: HTTP ${r.status}`);
     return r.json();
   };
   const [tasks, tasksEn, maps, mapsEn] = await Promise.all([get('tasks'), get('tasks_en'), get('maps'), get('maps_en')]);
-  return transformMapData({ tasks, tasksEn, maps, mapsEn, neededNodes, gameMode });
+  return { tasks, tasksEn, maps, mapsEn, gameMode };
+}
+
+export async function buildMapData({ gameMode = 'regular', neededNodes = null, fetchFn = globalThis.fetch } = {}) {
+  return transformMapData({ ...(await fetchTarkovJson(gameMode, fetchFn)), neededNodes });
+}
+
+const wikiTitle = (link) => { try { return decodeURIComponent(String(link || '').split('/wiki/')[1] || '').replace(/_/g, ' ').replace(/#.*/, '').trim() || null; } catch { return null; } };
+
+// Quest prerequisites straight from the game files (via tarkov.dev), keyed by wiki page title.
+// Used to fill links the wiki pages are missing (e.g. the Gunsmith Master chain).
+export function transformGameReqs({ tasks, tasksEn }) {
+  const tr = (k) => (k != null && tasksEn?.data?.[k] ? tasksEn.data[k] : k);
+  const all = Object.values(tasks.data.tasks || {});
+  const byId = Object.fromEntries(all.map(t => [t.id, t]));
+  const quests = {};
+  for (const t of all) {
+    const title = wikiTitle(t.wikiLink) || tr(t.name);
+    const req = (t.taskRequirements || []).map(r => { const p = byId[r.task]; return p ? { q: wikiTitle(p.wikiLink) || tr(p.name), st: r.status || [] } : null; }).filter(Boolean);
+    quests[title] = { req, lvl: t.minPlayerLevel || 0, kappa: !!t.kappaRequired, lk: !!t.lightkeeperRequired };
+  }
+  return { source: 'json.tarkov.dev', fetchedAt: Date.now(), quests };
 }
 
 export function transformMapData({ tasks, tasksEn, maps, mapsEn, neededNodes = null, gameMode = 'regular' }) {

@@ -5,7 +5,8 @@ import { esc, attr, icon, img, initTooltips, hideTip, confirmDialog, toast, $, $
 import { expanded, openQuestInfo, openChapterInfo, openItemInfo, openWikiPage, openModuleInfo, closeDrawer } from './components.js';
 import { renderStory, renderKappa, renderTraders, renderQuests } from './tabs-quests.js';
 import { renderHideout, renderPrestige, renderBattlepass, renderAchievements, renderItems } from './tabs-other.js';
-import { loadDataset, buildLive, isStale, ageText } from './data.js';
+import { loadDataset, buildLive, isStale, ageText, loadGameReqs } from './data.js';
+let gameReqs = null;
 import { initMapPanel, openMap } from './mappanel.js';
 import { perksBannerHtml, openPerks, togglePerk } from './perks.js';
 
@@ -22,6 +23,9 @@ const TABS = [
 ];
 
 let current = 'story';
+let undoSnap = null;
+function snapshot() { const p = P(); return JSON.stringify({ quests: p.quests, obj: p.obj, ch: p.ch, chObj: p.chObj, choices: p.settings.choices }); }
+function withUndo(msg) { toast(`${msg} <button class="linkbtn" data-act="undo">Undo</button>`, 6000); }
 let lastDrawer = null;
 
 // ---------- theme ----------
@@ -112,8 +116,9 @@ function route() {
 async function toggleQuest(name) {
   const q = D.quests[name];
   if (!isDone(name)) {
+    undoSnap = snapshot();
     const n = completeQuest(name);
-    toast(n ? `<b>${esc(name)}</b> done · ${n} prerequisite quest${n > 1 ? 's' : ''} checked too` : `<b>${esc(name)}</b> done`);
+    withUndo(n ? `<b>${esc(name)}</b> done · ${n} earlier quest${n > 1 ? 's' : ''} checked too` : `<b>${esc(name)}</b> done`);
     return;
   }
   const deps = doneDependents(name);
@@ -147,18 +152,20 @@ async function toggleObjective(qname, oid) {
   const o = q.objectives.find(x => x.id === oid);
   const extra = descendants(q.objectives, oid);
   if (o?.kind === 'handover') for (const x of q.objectives) if (x.kind === 'find' && x.items?.some(i => o.items?.some(j => j.item === i.item))) extra.push(x.id, ...descendants(q.objectives, x.id));
+  undoSnap = snapshot();
   const pre = [...prerequisiteClosure(qname)].filter(n => !isDone(n));
   store.update(p => { p.obj[key] = 1; for (const id of extra) p.obj[objKey(qname, id)] = 1; for (const n of pre) p.quests[n] = 1; });
-  if (pre.length) toast(`${pre.length} prerequisite quest${pre.length > 1 ? 's' : ''} of <b>${esc(qname)}</b> checked too`);
+  if (pre.length) withUndo(`${pre.length} earlier quest${pre.length > 1 ? 's' : ''} of <b>${esc(qname)}</b> checked too`);
   const pr = questObjProgress(q);
   if (pr.total && pr.done === pr.total) { const n = completeQuest(qname); toast(`All objectives done – <b>${esc(qname)}</b> completed${n ? ` (+${n} prerequisites)` : ''}`); }
 }
 
-async function toggleChapter(name) {
+async function toggleChapter(name, fromObjective = false) {
   if (!chDone(name)) {
     const add = chapterClosure(name);
+    if (!fromObjective) undoSnap = snapshot();
     store.update(p => { p.ch[name] = 1; for (const c of add) p.ch[c] = 1; });
-    toast(`<b>${esc(name)}</b> done${add.size ? ` · ${add.size} earlier chapter${add.size > 1 ? 's' : ''} checked too` : ''}`);
+    withUndo(`<b>${esc(name)}</b> done${add.size ? ` · ${add.size} earlier chapter${add.size > 1 ? 's' : ''} checked too` : ''}`);
     return;
   }
   const deps = Object.keys(D.chapters).filter(c => chDone(c) && chapterClosure(c).has(name));
@@ -189,6 +196,7 @@ function toggleChObj(cname, oid) {
   const ending = P().settings.ending;
   const idx = c.objectives.findIndex(x => x.id === oid);
   const o = c.objectives[idx];
+  undoSnap = snapshot();
   // checking a step inside a branch tells us which choice you made
   const ct = (o.cond || '').replace(/<[^>]+>/g, '');
   const infer = {};
@@ -200,9 +208,9 @@ function toggleChObj(cname, oid) {
   const chs = [...chapterClosure(cname)].filter(n => !chDone(n));
   store.update(p => { for (const id of ids) p.chObj[`${cname}|${id}`] = 1; for (const n of chs) p.ch[n] = 1; });
   const extra = ids.length - 1;
-  if (extra || chs.length) toast(`${extra ? `${extra} earlier objective${extra > 1 ? 's' : ''}` : ''}${extra && chs.length ? ' and ' : ''}${chs.length ? `chapter${chs.length > 1 ? 's' : ''} ${chs.map(esc).join(', ')}` : ''} checked too`);
+  if (extra || chs.length) withUndo(`${extra ? `${extra} earlier objective${extra > 1 ? 's' : ''}` : ''}${extra && chs.length ? ' and ' : ''}${chs.length ? `chapter${chs.length > 1 ? 's' : ''} ${chs.map(esc).join(', ')}` : ''} checked too`);
   const pr = chapterProgress(c);
-  if (pr.total && pr.done === pr.total) { toggleChapter(cname); }
+  if (pr.total && pr.done === pr.total) { toggleChapter(cname, true); }
 }
 
 async function setHideout(mod, level) {
@@ -227,6 +235,7 @@ async function settingsDialog() {
       <div class="set-grid">
         <label class="tog"><input type="checkbox" id="s-eod" ${p.settings.eod ? 'checked' : ''}> I own <b>Edge of Darkness</b> (EOD-only quests)</label>
         <label class="tog"><input type="checkbox" id="s-unh" ${p.settings.unheard ? 'checked' : ''}> I own <b>The Unheard</b> edition</label>
+        <label class="tog"><input type="checkbox" id="s-series" ${p.settings.seriesLogic !== false ? 'checked' : ''}> When checking a quest, also check earlier parts of the same series (e.g. all lower-level <b>Gunsmith</b> quests)</label>
         <p class="small muted">Settings apply to the <b>${esc(store.profile.long)}</b> profile.</p>
         <div class="set-row"><button class="btn" data-x="export">${icon('download')} Export progress</button><button class="btn" data-x="import">${icon('upload')} Import progress</button><input type="file" id="s-file" accept="application/json" hidden></div>
         <div class="set-row"><button class="btn" data-x="refresh">${icon('refresh')} Update data from wiki now</button><button class="btn btn-d" data-x="reset">Reset this profile</button></div>
@@ -251,7 +260,7 @@ function onSettingsClick(e) {
   if (x === 'reset') { if (confirm(`Reset all progress of the ${store.profile.long} profile?`)) { store.resetProfile(); document.querySelector('.modal-wrap')?.remove(); } }
 }
 document.addEventListener('change', (e) => {
-  if (e.target.id === 's-eod' || e.target.id === 's-unh') store.update(p => { p.settings.eod = document.getElementById('s-eod').checked; p.settings.unheard = document.getElementById('s-unh').checked; });
+  if (e.target.id === 's-eod' || e.target.id === 's-unh' || e.target.id === 's-series') store.update(p => { p.settings.eod = document.getElementById('s-eod').checked; p.settings.unheard = document.getElementById('s-unh').checked; p.settings.seriesLogic = document.getElementById('s-series').checked; });
 });
 
 async function refreshData(manual = false) {
@@ -261,7 +270,7 @@ async function refreshData(manual = false) {
   document.body.appendChild(bar);
   try {
     const ds = await buildLive((pct, msg) => { bar.querySelector('.rb-f').style.width = Math.round(pct * 100) + '%'; bar.querySelector('.rb-t').textContent = msg; });
-    setDataset(ds); render(); renderBanner(); renderFooter();
+    setDataset(ds, gameReqs); render(); renderBanner(); renderFooter();
     toast(`Data updated: ${Object.keys(ds.quests).length} quests`);
   } catch (e) {
     console.error(e);
@@ -309,6 +318,7 @@ function onClick(e) {
     case 'info-item': (lastDrawer = () => openItemInfo(b.dataset.item))(); break;
     case 'info-mod': (lastDrawer = () => openModuleInfo(b.dataset.m))(); break;
     case 'drawer-close': closeDrawer(); lastDrawer = null; break;
+    case 'undo': if (undoSnap) { const s = JSON.parse(undoSnap); undoSnap = null; store.update(pp => { pp.quests = s.quests; pp.obj = s.obj; pp.ch = s.ch; pp.chObj = s.chObj; pp.settings.choices = s.choices; }); toast('Undone'); } break;
     case 'perks': (lastDrawer = openPerks)(); break;
     case 'map': openMap(b.dataset.map, b.dataset.focus || null); break;
     case 'cnt': {
@@ -368,7 +378,8 @@ async function boot() {
   store.on((reason) => { render(); if (reason === 'profile' || reason === 'perks') { renderBanner(); } });
 
   $('#main').innerHTML = `<div class="boot"><div class="boot-t">Loading quest data…</div><div class="rb"><div class="rb-f" style="width:10%"></div></div></div>`;
-  let ds = await loadDataset();
+  let [ds, gr] = await Promise.all([loadDataset(), loadGameReqs()]);
+  gameReqs = gr;
   if (!ds) {
     $('#main').innerHTML = `<div class="boot"><div class="boot-t">First start: reading all quests from the EFT wiki (≈20–40 s)…</div><div class="rb"><div class="rb-f"></div></div><div class="boot-m small muted"></div></div>`;
     try {
@@ -378,7 +389,7 @@ async function boot() {
       return;
     }
   }
-  setDataset(ds);
+  setDataset(ds, gameReqs);
   route();
   renderBanner();
   renderFooter();

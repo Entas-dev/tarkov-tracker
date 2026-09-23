@@ -7,8 +7,9 @@ export const ENDINGS = ['Savior', 'Debtor', 'Survivor', 'Fallen'];
 export let D = null;
 export const IX = {};
 
-export function setDataset(ds) {
+export function setDataset(ds, gameReqs = null) {
   D = ds;
+  D.gameReqs = gameReqs || D.gameReqs || null;
   buildIndexes();
 }
 
@@ -26,6 +27,19 @@ function buildIndexes() {
     (rev[b] = rev[b] || []).push({ q: a.name, type: 'complete', fromLeads: true });
   }
   for (const [b, alts] of Object.entries(rev)) Q[b].pre.push(alts);
+  // prerequisites from the game files (tarkov.dev export) fill links missing on the wiki pages
+  const G = D.gameReqs?.quests || {};
+  for (const q of Object.values(Q)) {
+    const g = G[q.name];
+    if (!g) continue;
+    if (!q.minLevel && g.lvl) q.minLevel = g.lvl;
+    for (const r of g.req || []) {
+      if (!Q[r.q] || r.q === q.name || q.pre.some(gr => gr.some(a => a.q === r.q))) continue;
+      const st = r.st || [];
+      const type = st.includes('active') ? 'accept' : st.includes('complete') ? 'complete' : st.includes('failed') ? 'fail' : 'complete';
+      q.pre.push([{ q: r.q, type, fromGame: true }]);
+    }
+  }
   // Collector (Kappa) requires every quest the wiki marks as "required for Kappa"
   if (Q['Collector']) {
     const C = Q['Collector'];
@@ -41,6 +55,30 @@ function buildIndexes() {
     q.preSeasonal = pre;
     q.allMaps = [...new Set([...(q.maps || []), ...q.objectives.flatMap(o => o.maps || [])])];
     q.slug = q.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  }
+  // quest series ("Gunsmith - …", "… - Part N"): earlier members by part number, otherwise by unlock level
+  const lvlOf = (q) => Math.max(q.minLevel || 0, (q.ll && D.traders[q.ll.trader]?.ll?.find(l => l.level === q.ll.level)?.pmcLevel) || 0);
+  const groups = {};
+  for (const q of Object.values(Q)) {
+    const i = q.name.lastIndexOf(' - ');
+    if (i < 0 || q.alts?.length || q.event || q.mode) continue;
+    let base = q.name.slice(0, i);
+    const pm = q.name.match(/^(.*) - Part (\d+)$/i);
+    if (pm) base = pm[1];
+    (groups[(q.trader || '') + '|' + base] = groups[(q.trader || '') + '|' + base] || []).push(q);
+  }
+  IX.seriesPrev = {};
+  for (const members of Object.values(groups)) {
+    if (members.length < 2) continue;
+    const part = (q) => { const m = q.name.match(/ - Part (\d+)$/i); return m ? +m[1] : null; };
+    const allPart = members.every(q => part(q) != null);
+    const ord = (q) => (allPart ? part(q) : lvlOf(q));
+    for (const m of members) {
+      const o = ord(m);
+      if (!o) continue;
+      const prev = members.filter(x => x !== m && ord(x) && ord(x) < o).map(x => x.name);
+      if (prev.length) IX.seriesPrev[m.name] = prev;
+    }
   }
   IX.graph = {};
   for (const mode of ['normal', 'seasonal']) {
@@ -168,9 +206,11 @@ export function questStatus(q, p = P()) {
 // ---------- regressive completion ----------
 export function prerequisiteClosure(name, p = P()) {
   const out = new Set();
+  const series = p.settings.seriesLogic !== false;
   const walk = (n) => {
     const q = D.quests[n];
     if (!q) return;
+    if (series) for (const m of IX.seriesPrev?.[n] || []) if (!out.has(m) && m !== name && visible(D.quests[m], p)) { out.add(m); walk(m); }
     for (const g of preOf(q)) {
       const vis = g.filter(a => visible(D.quests[a.q], p));
       const comp = vis.filter(a => a.type === 'complete');
