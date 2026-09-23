@@ -88,6 +88,7 @@ function ensureDrawer() {
   return drawer;
 }
 export function closeDrawer() { drawer?.classList.remove('open'); }
+export function openPanel(title, html) { return openDrawer(title, html); }
 function openDrawer(title, html) {
   const d = ensureDrawer();
   d.querySelector('.drawer-title').innerHTML = title;

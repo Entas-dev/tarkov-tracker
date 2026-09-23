@@ -551,7 +551,41 @@ export function parseSeasons(wt) {
     start: m ? new Date(m[1] + ' UTC').toISOString() : null,
     end: m ? new Date(m[2] + ' UTC').toISOString() : null,
     differencesHtml: diff ? bulletTree(diff.direct).filter(n => !n.text).map(n => inlineHtml(n.raw)) : [],
+    modifiers: {
+      common: modTable(secs.find(s => s.level === 3 && /common modifiers/i.test(s.titleText))),
+      positive: modTable(secs.find(s => s.level === 3 && /positive modifiers/i.test(s.titleText))),
+      negative: modTable(secs.find(s => s.level === 3 && /negative modifiers/i.test(s.titleText))),
+    },
+    rewards: seasonRewards(secs.find(s => s.level === 3 && /seasonal rewards/i.test(s.titleText))),
   };
+}
+
+function modTable(sec) {
+  if (!sec) return [];
+  const tb = tables(sec.direct)[0];
+  if (!tb) return [];
+  const head = tb.rows[0].map(c => plain(c.raw).toLowerCase());
+  const col = (re) => head.findIndex(h => re.test(h));
+  const cI = col(/icon/), cN = col(/name/), cE = col(/effect/), cP = col(/points/), cO = col(/notes/);
+  return tb.rows.slice(1).filter(r => r.length >= 3).map(r => ({
+    name: plain(r[cN]?.raw || ''),
+    icon: files(r[cI]?.raw || '')[0]?.file || null,
+    effectHtml: inlineHtml((r[cE]?.raw || '').replace(/\n/g, '<br/>')),
+    effect: plain(r[cE]?.raw || ''),
+    points: cP >= 0 ? num(r[cP]?.raw) : null,
+    notesHtml: cO >= 0 ? inlineHtml((r[cO]?.raw || '').replace(/\n(?=\*)/g, ' ').replace(/^\*+\s*/gm, '• ')) : '',
+  })).filter(m => m.name);
+}
+
+function seasonRewards(sec) {
+  if (!sec) return [];
+  const tb = tables(sec.direct)[0];
+  if (!tb) return [];
+  return tb.rows.slice(1).filter(r => r.length >= 5).map(r => ({
+    icon: files(r[0]?.raw || '')[0]?.file || null,
+    name: plain(r[1]?.raw || ''), link: links(r[1]?.raw || '')[0]?.target || null,
+    type: plain(r[2]?.raw || ''), level: num(r[3]?.raw), quest: links(r[4]?.raw || '')[0]?.target || plain(r[4]?.raw || ''),
+  }));
 }
 
 // ---------- linked pages (items/maps/npcs) ----------

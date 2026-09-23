@@ -3,6 +3,7 @@ import { store } from './store.js';
 import { D, IX, P, ENDINGS, visible, questStatus, isDone, chDone, chapterProgress, chapterClosure, traderLL, questNeeds, isSeasonal } from './model.js';
 import { esc, attr, icon, img, traderImg, qlink, itemChip, progressBar, fmt, statusBadge } from './ui.js';
 import { questCard, objectiveRows, needsBlock, mapChips, expanded } from './components.js';
+import { perksNotesHtml } from './perks.js';
 
 const ui = () => store.ui;
 const setUi = (k, v) => store.setUi(k, v);
@@ -127,6 +128,7 @@ export function renderKappa(root) {
     <div class="th-with-img">${img(kItem?.img, 'Kappa', 'kappa-img')}<div><h1>Kappa</h1><p class="lede">Everything needed to finish <b>Collector</b> (Fence) and get the Kappa container.</p></div></div>
     <div class="head-stat">${progressBar(done, kap.length, 'Kappa quests')}${progressBar(colHave, colNeeds.length, 'Collector items')}</div>
   </div>
+  ${perksNotesHtml('kappa')}
   ${col ? `<section class="panel">
     <div class="panel-h"><h2>Collector</h2>${statusBadge(questStatus(col, p).s)}<button class="ibtn" data-act="info" data-q="Collector" aria-label="Info">${icon('info')}</button></div>
     <div class="grid12">
@@ -155,6 +157,7 @@ export function renderTraders(root) {
   <div class="trader-row" role="tablist" aria-label="Traders">
     ${list.map(t => { const all = (IX.byTrader[t] || []).filter(n => visible(D.quests[n], p)); const d = all.filter(n => isDone(n, p)).length; return `<button role="tab" aria-selected="${t === sel}" class="trader-tab ${t === sel ? 'on' : ''}" data-act="trader" data-t="${attr(t)}">${traderImg(t, 'tt-big')}<span class="tn">${esc(t)}</span><span class="tp">${d}/${all.length}</span></button>`; }).join('')}
   </div>
+  ${perksNotesHtml('traders')}
   <section class="panel trader-panel">
     <div class="trader-hero">${img(T.img, sel, 'trader-portrait')}
       <div class="trader-info">

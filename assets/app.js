@@ -7,6 +7,7 @@ import { renderStory, renderKappa, renderTraders, renderQuests } from './tabs-qu
 import { renderHideout, renderPrestige, renderBattlepass, renderAchievements, renderItems } from './tabs-other.js';
 import { loadDataset, buildLive, isStale, ageText } from './data.js';
 import { initMapPanel, openMap } from './mappanel.js';
+import { perksBannerHtml, openPerks, togglePerk } from './perks.js';
 
 const TABS = [
   { id: 'story', label: 'Main Story', render: renderStory },
@@ -82,7 +83,7 @@ function renderBanner() {
       <div class="ev-main"><div><span class="ev-tag">Event</span> <b>${esc(e.title)}</b> <span class="muted">since ${esc(e.dateText)}</span></div>
       <details><summary>What changed</summary>${e.quoteHtml ? `<p class="small">${e.quoteHtml}</p>` : ''}<ul class="small">${e.changesHtml.map(c => `<li>${c}</li>`).join('')}</ul></details></div>
       <button class="ibtn" data-act="dismiss-ev" data-k="${attr(e.title + e.dateText)}" aria-label="Dismiss">${icon('x')}</button></div>`).join('')
-    + (store.active === 'seasonal' && season ? `<div class="banner-ev season"><span class="ev-tag">Season</span> <b>${esc(season.name)}</b>${sEnd != null ? ` <span class="muted">ends in ${sEnd} days</span>` : ''}<details><summary>Differences in this mode</summary><ul class="small">${season.differencesHtml.map(d => `<li>${d}</li>`).join('')}</ul></details></div>` : '');
+    + (store.active === 'seasonal' && season ? `<div class="banner-ev season"><span class="ev-tag">Season</span> <b>${esc(season.name)}</b>${sEnd != null ? ` <span class="muted">ends in ${sEnd} days</span>` : ''}<details><summary>Differences in this mode</summary><ul class="small">${season.differencesHtml.map(d => `<li>${d}</li>`).join('')}</ul></details>${perksBannerHtml()}</div>` : '');
 }
 
 function render() {
@@ -275,6 +276,7 @@ function onClick(e) {
     case 'info-item': (lastDrawer = () => openItemInfo(b.dataset.item))(); break;
     case 'info-mod': (lastDrawer = () => openModuleInfo(b.dataset.m))(); break;
     case 'drawer-close': closeDrawer(); lastDrawer = null; break;
+    case 'perks': (lastDrawer = openPerks)(); break;
     case 'map': openMap(b.dataset.map, b.dataset.focus || null); break;
     case 'cnt': {
       const k = b.dataset.k, d = +b.dataset.d, max = +b.dataset.max || Infinity;
@@ -326,11 +328,11 @@ async function boot() {
   document.addEventListener('click', onClick);
   document.addEventListener('click', onSettingsClick);
   document.addEventListener('input', (e) => { if (e.target.matches('input[type=search]')) onInput(e); });
-  document.addEventListener('change', (e) => { if (e.target.matches('select,input[type=checkbox],input[type=number]') && !e.target.id?.startsWith('s-') && !e.target.closest('.mappanel')) { if (e.target.dataset.set === 'faction') store.update(p => { p.settings.faction = e.target.value; }); else onInput(e); } });
+  document.addEventListener('change', (e) => { if (e.target.dataset?.perk) { togglePerk(e.target.dataset.perk, e.target.checked); return; } if (e.target.matches('select,input[type=checkbox],input[type=number]') && !e.target.id?.startsWith('s-') && !e.target.closest('.mappanel')) { if (e.target.dataset.set === 'faction') store.update(p => { p.settings.faction = e.target.value; }); else onInput(e); } });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeDrawer(); lastDrawer = null; hideTip(); } });
   addEventListener('hashchange', route);
   matchMedia('(prefers-color-scheme: light)').addEventListener?.('change', () => renderHeader());
-  store.on((reason) => { render(); if (reason === 'profile') { renderBanner(); } });
+  store.on((reason) => { render(); if (reason === 'profile' || reason === 'perks') { renderBanner(); } });
 
   $('#main').innerHTML = `<div class="boot"><div class="boot-t">Loading quest data…</div><div class="rb"><div class="rb-f" style="width:10%"></div></div></div>`;
   let ds = await loadDataset();

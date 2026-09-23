@@ -180,6 +180,8 @@ export async function buildDataset({ wiki = new Wiki(), log = console.log, progr
   for (const e of Object.values(endings.endings)) if (e.icon) want[96].add(e.icon);
   for (const e of events) if (e.image) want[480].add(e.image);
   if (endings.flowchart) want[480].add(endings.flowchart);
+  if (season?.modifiers) for (const grp of Object.values(season.modifiers)) for (const m of grp) if (m.icon) want[96].add(m.icon);
+  for (const r of season?.rewards || []) if (r.icon) want[96].add(r.icon);
   const images = {};
   for (const [w, set] of Object.entries(want)) {
     const res = await wiki.imageUrls([...set], +w);
@@ -204,6 +206,8 @@ export async function buildDataset({ wiki = new Wiki(), log = console.log, progr
   for (const e of Object.values(endings.endings)) e.img = img(e.icon);
   for (const e of events) e.img = img(e.image);
   endings.flowchartImg = img(endings.flowchart);
+  if (season?.modifiers) for (const grp of Object.values(season.modifiers)) for (const m of grp) m.img = img(m.icon);
+  for (const r of season?.rewards || []) r.img = img(r.icon);
 
   step(1, 'Done');
   return {

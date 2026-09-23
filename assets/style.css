@@ -379,6 +379,27 @@ a.wl:hover { border-bottom-style: solid; }
 .season .ev-tag { background: var(--season); }
 @media (max-width: 600px) { .ev-img { display: none; } }
 
+/* season perks */
+.perk-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px solid color-mix(in srgb, var(--season) 40%, var(--line)); }
+.perk-lbl { font-family: var(--font-h); text-transform: uppercase; font-weight: 700; font-size: 13px; color: var(--season); }
+.perk-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; border: 1px solid var(--line); border-radius: 2px; padding: 1px 6px 1px 2px; background: var(--panel); }
+.perk-chip.positive { border-color: var(--ok); } .perk-chip.negative { border-color: var(--bad); }
+.perk-ic { width: 22px; height: 22px; object-fit: contain; }
+.perk-list { display: grid; gap: 6px; }
+.perk { display: flex; gap: 10px; align-items: flex-start; padding: 8px; background: var(--bg2); border: 1px solid var(--line); border-radius: var(--radius); cursor: pointer; }
+.perk.on { border-color: var(--season); background: color-mix(in srgb, var(--season) 10%, var(--bg2)); }
+.perk input { accent-color: var(--season); width: 18px; height: 18px; margin-top: 4px; flex: none; }
+.perk-cb.fixed { color: var(--season); margin-top: 4px; }
+.perk-big { width: 44px; height: 44px; object-fit: contain; flex: none; }
+.perk-b { display: grid; gap: 2px; }
+.perk-pts { font-weight: 700; font-size: 13px; }
+.perk-pts.neg { color: var(--bad); } .perk-pts.pos { color: var(--ok); }
+.perk-eff { color: var(--season); }
+.perk-eff .ic { width: 12px; height: 12px; }
+.perk-sum { padding: 8px 10px; background: var(--bg2); border: 1px solid var(--line); border-radius: var(--radius); margin: 8px 0; }
+.perk-notice { border-color: var(--season); }
+.rw { display: inline-flex; align-items: center; gap: 6px; }
+
 /* map panel */
 .mappanel { position: fixed; top: 8px; right: 12px; z-index: 50; }
 .mappanel:not(.collapsed) { top: 96px; }

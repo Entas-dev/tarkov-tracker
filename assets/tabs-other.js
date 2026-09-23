@@ -3,6 +3,7 @@ import { store } from './store.js';
 import { D, IX, P, hLevel, moduleMax, levelReqStatus, hcntKey, isSeasonal, isPvE, isDone, chDone, traderLL, shoppingList, questStatus } from './model.js';
 import { esc, attr, icon, img, qlink, itemChip, progressBar, fmt, statusBadge, traderImg } from './ui.js';
 import { expanded } from './components.js';
+import { skillReqStatus, perksNotesHtml } from './perks.js';
 
 const ui = () => store.ui;
 
@@ -17,6 +18,7 @@ export function renderHideout(root) {
   root.innerHTML = `
   <div class="tab-head"><div><h1>Hideout</h1><p class="lede">Click a level pip to set what you have built; lower levels and required modules are set automatically.${isSeasonal() ? ' <b>Seasonal:</b> no hideout items need to be found in raid.' : ''}</p></div>
     <div class="head-stat">${progressBar(builtLv, totalLv, 'Module levels')}</div></div>
+  ${perksNotesHtml('hideout')}
   <div class="filters"><div class="seg" role="radiogroup" aria-label="Filter">${[['all', 'All modules'], ['open', 'Not maxed'], ['ready', 'Next level unlockable']].map(([v, l]) => `<button role="radio" aria-checked="${f === v}" class="seg-b ${f === v ? 'on' : ''}" data-act="hf" data-v="${v}">${l}</button>`).join('')}</div></div>
   <div class="hgrid">${list.map(m => moduleCard(m)).join('')}</div>`;
 }
@@ -36,7 +38,7 @@ function moduleCard(m) {
       <ul class="hreq">
         ${L.modules.map(r => `<li class="${hLevel(r.name, p) >= r.level ? 'ok' : 'no'}">${hLevel(r.name, p) >= r.level ? icon('check') : icon('x')} ${esc(r.name)} level ${r.level}</li>`).join('')}
         ${L.traders.map(r => `<li class="${traderLL(r.name, p) >= r.level ? 'ok' : 'no'}">${traderLL(r.name, p) >= r.level ? icon('check') : icon('x')} ${esc(r.name)} LL${r.level}</li>`).join('')}
-        ${L.skills.map(r => `<li class="na">• ${esc(r.name)} skill level ${r.level}</li>`).join('')}
+        ${L.skills.map(r => { const s = skillReqStatus(r.name, r.level, p); return s === 'ok' ? `<li class="ok" data-tip="Covered by your season perks">${icon('check')} ${esc(r.name)} skill level ${r.level}</li>` : s === 'impossible' ? `<li class="no" data-tip="Your season perks cap skills below this level">${icon('x')} ${esc(r.name)} skill level ${r.level} (impossible with your perks)</li>` : `<li class="na">• ${esc(r.name)} skill level ${r.level}</li>`; }).join('')}
         ${L.other.map(o => `<li class="na">• ${o}</li>`).join('')}
       </ul>
       ${L.functionsHtml.length ? `<div class="hl-fn small muted">${L.functionsHtml.join(' · ')}</div>` : ''}
@@ -148,6 +150,7 @@ export function renderItems(root) {
   root.innerHTML = `
   <div class="tab-head"><div><h1>Needed Items</h1><p class="lede">Everything you still need across unfinished quests, story and hideout. Don't sell these.</p></div>
     <div class="head-stat"><div class="stat"><b>${shown.length}</b> different items · <b>${fmt(shown.reduce((s, a) => s + a.need - a.have, 0))}</b> pieces · <b class="c-red">${fmt(firTotal)}</b> must be FiR</div></div></div>
+  ${perksNotesHtml('items')}
   <div class="filters">
     <div class="seg" role="radiogroup" aria-label="Scope">${[['all', 'Everything'], ['kappa', 'Kappa quests'], ['hideout', 'Hideout'], ['story', 'Story']].map(([v, l]) => `<button role="radio" aria-checked="${f.scope === v}" class="seg-b ${f.scope === v ? 'on' : ''}" data-act="iscope" data-v="${v}">${l}</button>`).join('')}</div>
     <label class="search">${icon('search')}<input type="search" placeholder="Search items" value="${attr(f.q || '')}" data-if="q" aria-label="Search items"></label>
