@@ -411,6 +411,8 @@ a.wl:hover { border-bottom-style: solid; }
 .mk-focus span, .mk-focus img { box-shadow: 0 0 0 3px #f2c14e, 0 0 12px #f2c14e; }
 .mk-ex span { display: inline-block; white-space: nowrap; font-size: 11px; font-weight: 700; color: #e9ffe0; background: rgba(40,90,30,.85); border: 1px solid #7fa35a; padding: 0 4px; border-radius: 2px; transform: translate(-50%, -50%); }
 .mk-shared span { background: rgba(80,70,20,.85); border-color: #c9a227; }
+.mk-loot span { background: #4fa3a5; border: 2px solid #10201f; border-radius: 50%; }
+.mk-lock span { display: grid; place-items: center; color: #e6d3ff; background: rgba(20,20,16,.85); border: 2px solid #b58ad6; border-radius: 4px; }
 .leaflet-container { background: #1c1d19; font: inherit; }
 .leaflet-popup-content { font-size: 13px; }
 

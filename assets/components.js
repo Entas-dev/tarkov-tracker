@@ -42,9 +42,10 @@ export function objectiveRows(q, { chapter = false, ending = null } = {}) {
   return `<ul class="objs">${rows.join('')}</ul>`;
 }
 
-export function needsBlock(q, { chapter = false } = {}) {
+export function needsBlock(q, { chapter = false, ending = null } = {}) {
   const p = P();
-  const needs = chapter ? (q.needs || []).map(n => ({ ...n, have: p.cnt[`ch:${q.name}|${n.item}`] || 0 })) : questNeeds(q, p, { includeOptional: true });
+  const visObj = (id) => { const o = q.objectives.find(x => x.id === id); return !ending || !o?.endings || o.endings.includes(ending); };
+  const needs = chapter ? (q.needs || []).filter(n => !n.objectives?.length || n.objectives.some(visObj)).map(n => ({ ...n, have: p.cnt[`ch:${q.name}|${n.item}`] || 0 })) : questNeeds(q, p, { includeOptional: true });
   if (!needs.length) return '';
   return `<div class="needs"><div class="sub-h">Items</div><div class="chips">${needs.map(n => itemChip(n.item, { count: n.count, have: n.have, fir: n.fir, optional: n.optional, counter: (chapter ? 'ch:' : '') + cntKey(q.name, n.item) })).join('')}</div></div>`;
 }

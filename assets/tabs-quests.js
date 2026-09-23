@@ -57,7 +57,7 @@ function chapterCard(c, required, ending) {
       ${c.descHtml ? `<blockquote>${c.descHtml}</blockquote>` : ''}
       ${c.reqHtml.length ? `<div class="sub-h">Unlock</div>${c.reqHtml.map(r => `<p class="small">${r}</p>`).join('')}` : ''}
       <div class="sub-h">Objectives</div>${objectiveRows(c, { chapter: true, ending })}
-      ${needsBlock(c, { chapter: true })}
+      ${needsBlock(c, { chapter: true, ending })}
       ${c.rewardsHtml.length || endRew ? `<details class="rew"><summary>Rewards</summary><ul>${[...c.rewardsHtml, ...(endRew || [])].map(r => `<li>${r.html}</li>`).join('')}</ul></details>` : ''}
     </div>` : ''}
   </article>`;

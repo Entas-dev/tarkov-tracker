@@ -4,7 +4,7 @@ import { store } from './store.js';
 import { D, IX, P, visible, questStatus, isDone, objDone } from './model.js';
 import { esc, attr, icon, img, itemChip, traderImg } from './ui.js';
 import { idbGet, idbSet } from './data.js';
-import { fetchTarkovDev } from '../builder/tarkovdev.js';
+import { fetchTarkovDev, fetchMapLoot } from '../builder/tarkovdev.js';
 
 const LEAFLET_JS = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js';
 const LEAFLET_CSS = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css';
@@ -12,6 +12,8 @@ const LEAFLET_CSS = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leafle
 let panel, mapEl, listEl, leafletMap, L, mapCfgs = null, curKey = null, markerLayer = null, extractLayer = null, focusQuest = null;
 let tdev = null; // {tasks, maps, fetchedAt, gameMode}
 let tdevState = 'idle';
+const lootCache = {}; // key -> {loot, locks} | 'loading' | 'failed'
+let lootLayer = null;
 
 const WIKI_TO_KEY = (name) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -26,6 +28,7 @@ export function initMapPanel() {
       <div class="mp-head">
         <select class="mp-select" aria-label="Choose map"></select>
         <label class="tog small"><input type="checkbox" data-mp="extracts" checked> Extracts</label>
+        <label class="tog small" data-tip="Loose-loot spawn points of items your active quests need, and doors for needed keys"><input type="checkbox" data-mp="loot" checked> Item spawns</label>
         <span class="mp-status small muted"></span>
         <button class="ibtn" data-mp="size" aria-label="Enlarge">${icon('expand')}</button>
         <button class="ibtn" data-mp="toggle" aria-label="Collapse">${icon('x')}</button>
@@ -48,6 +51,7 @@ export function initMapPanel() {
   });
   panel.querySelector('.mp-select').addEventListener('change', (e) => showMap(e.target.value));
   panel.querySelector('[data-mp="extracts"]').addEventListener('change', () => drawMarkers());
+  panel.querySelector('[data-mp="loot"]').addEventListener('change', () => drawMarkers());
   store.on((reason) => {
     if (reason === 'profile' && initP && tdev?.gameMode !== store.profile.gameMode) { tdev = null; loadTarkovDev(); }
     if (!panel.classList.contains('collapsed')) { renderList(); drawMarkers(); }
@@ -176,6 +180,8 @@ async function showMap(key) {
   setTimeout(() => { leafletMap?.invalidateSize(); if (!focusQuest) leafletMap?.fitBounds(b); }, 80);
   markerLayer = L.layerGroup().addTo(leafletMap);
   extractLayer = L.layerGroup().addTo(leafletMap);
+  lootLayer = L.layerGroup().addTo(leafletMap);
+  loadLoot(cfg);
   renderList();
   drawMarkers(true);
 }
@@ -220,9 +226,37 @@ function hasMarkers(name) {
   return t.objectives.some(o => (o.zones || []).some(z => z.map?.normalizedName === cfg.normalizedName) || (o.possibleLocations || []).some(l => l.map?.normalizedName === cfg.normalizedName));
 }
 
+async function loadLoot(cfg) {
+  const gm = store.profile.gameMode;
+  const key = `loot-${gm}-${cfg.normalizedName}`;
+  if (lootCache[key]) return;
+  lootCache[key] = 'loading';
+  const cached = await idbGet(key);
+  if (cached && Date.now() - cached.fetchedAt < 24 * 3600e3) { lootCache[key] = cached; drawMarkers(); return; }
+  try {
+    const d = await fetchMapLoot(gm, displayName(cfg.key));
+    lootCache[key] = d; idbSet(key, d);
+  } catch (e) { lootCache[key] = cached || 'failed'; }
+  drawMarkers();
+}
+
+function neededItemsHere(names) {
+  const p = P();
+  const items = new Set(), keys = new Set();
+  for (const n of names) {
+    const q = D.quests[n];
+    for (const x of q.needs || []) {
+      const I = D.items[x.item];
+      if (!I || I.currency) continue;
+      if (/key|keycard/i.test(I.type || '') || /key(card)?\b/i.test(x.item)) keys.add(norm(x.item)); else items.add(norm(x.item));
+    }
+  }
+  return { items, keys };
+}
+
 function drawMarkers(fit = false) {
   if (!leafletMap || !markerLayer) return;
-  markerLayer.clearLayers(); extractLayer.clearLayers();
+  markerLayer.clearLayers(); extractLayer.clearLayers(); lootLayer?.clearLayers();
   const cfg = mapCfgs.find(m => m.key === curKey);
   const p = P();
   const names = activeQuestsHere();
@@ -256,6 +290,21 @@ function drawMarkers(fit = false) {
         if (!ex.position || (ex.faction && ex.faction !== 'pmc' && ex.faction !== 'shared')) continue;
         L.marker(pos(ex.position), { icon: L.divIcon({ className: `mk mk-ex ${ex.faction === 'shared' ? 'mk-shared' : ''}`, html: `<span>${esc(ex.name)}</span>`, iconSize: null }) }).addTo(extractLayer);
       }
+    }
+  }
+  const lc = lootCache[`loot-${store.profile.gameMode}-${cfg.normalizedName}`];
+  if (lc && typeof lc === 'object' && panel.querySelector('[data-mp="loot"]').checked) {
+    const { items, keys } = neededItemsHere(focusQuest ? [focusQuest] : names);
+    let n = 0;
+    for (const l of lc.loot) {
+      const hit = l.i.filter(x => items.has(norm(x)));
+      if (!hit.length || n > 600) continue;
+      n++;
+      L.marker(pos(l.p), { icon: L.divIcon({ className: 'mk mk-loot', html: '<span></span>', iconSize: [12, 12] }) }).bindPopup(`<b>Item spawn</b><br>${hit.map(esc).join('<br>')}`).addTo(lootLayer);
+    }
+    for (const k of lc.locks) {
+      if (!keys.has(norm(k.k))) continue;
+      L.marker(pos(k.p), { icon: L.divIcon({ className: 'mk mk-lock', html: `<span>${icon('lock')}</span>`, iconSize: [20, 20] }) }).bindPopup(`<b>Locked door</b><br>${esc(k.k)}`).addTo(lootLayer);
     }
   }
   if (fit && focusQuest && pts.length) leafletMap.fitBounds(L.latLngBounds(pts).pad(0.3), { maxZoom: (cfg.maxZoom || 5) - 1 });
