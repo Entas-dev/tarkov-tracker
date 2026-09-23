@@ -6,7 +6,7 @@ import {
   parseBattlePass, parseAchievements, parseEvents, parseSeasons, classifyPage,
 } from './parse.js';
 
-export const DATASET_VERSION = 1;
+export const DATASET_VERSION = 2;
 const CURRENCIES = new Set(['Roubles', 'Dollars', 'Euros', 'GP coin', 'TarCoin']);
 const MONEY = new Set(['Roubles', 'Dollars', 'Euros']);
 const NEVER_ITEM = new Set(['Found in raid', 'EXP', 'Scavs', 'PMC', 'Hideout', 'Flea Market', 'Escape from Tarkov', 'Loot', 'Weapons', 'Quests']);
