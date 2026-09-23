@@ -439,7 +439,7 @@ export function parsePrestige(wt) {
     L.icon = files(s.body).find(f => /icon/i.test(f.file))?.file || null;
     L.rewards = bulletTree(s.body).filter(n => !n.text).map(n => inlineHtml(n.raw));
   }
-  return { introHtml: inlineHtml(lead(wt).split('\n')[0] || ''), levels };
+  return { introHtml: inlineHtml((lead(wt).split('\n')[0] || '').replace(/\{\{PAGENAME\}\}/g, 'Prestige')), levels };
 }
 
 // ---------- BattlePass ----------

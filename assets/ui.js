@@ -50,6 +50,7 @@ export function qlink(name, { cls = '' } = {}) {
 
 export function itemChip(item, { count = null, have = null, fir = false, counter = null, small = false, optional = false } = {}) {
   const I = D.items[item] || { name: item };
+  if (I.currency) counter = null;
   const done = counter && have != null && count != null && have >= count;
   const cnt = count != null ? `<span class="ic-count">${have != null && counter ? `${fmt(have)}/` : ''}${fmt(count)}</span>` : '';
   const firB = fir ? `<span class="fir" title="Found in raid">FiR</span>` : '';
@@ -191,6 +192,7 @@ export function sanitizeWikiHtml(html) {
   const root = doc.body.firstElementChild;
   root.querySelectorAll('script,style,noscript,.mw-editsection,.navbox,.toc,link,meta').forEach(n => n.remove());
   root.querySelectorAll('h2').forEach((n, i) => { if (i === 0) n.remove(); });
+  root.querySelectorAll('table').forEach(t => { if (/Related Quest Items/i.test(t.rows?.[0]?.textContent || '')) t.remove(); });
   root.querySelectorAll('img').forEach(im => {
     const src = im.getAttribute('data-src') || im.getAttribute('src');
     if (!src || src.startsWith('data:')) { im.remove(); return; }

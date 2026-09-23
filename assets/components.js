@@ -55,7 +55,7 @@ export function questCard(q, { showTrader = true } = {}) {
   const pr = questObjProgress(q, p);
   const open = expanded.has(q.name);
   const seasonal = isSeasonal() && q.seasonal?.length ? `<div class="seasonal-box">${icon('flag')}<div>${q.seasonal.map(s => `<div>${s.html}</div>`).join('')}</div></div>` : '';
-  const needsMini = !open ? questNeeds(q, p).filter(n => n.missing > 0).slice(0, 4).map(n => itemChip(n.item, { count: n.count, fir: n.fir, small: true })).join('') : '';
+  const needsMini = !open ? questNeeds(q, p).filter(n => n.missing > 0 && !D.items[n.item]?.questItem).slice(0, 4).map(n => itemChip(n.item, { count: n.count, fir: n.fir, small: true })).join('') : '';
   return `<article class="qcard qs-${st.s} ${open ? 'open' : ''}" data-qcard="${attr(q.name)}">
     <div class="qc-head">
       <button class="cb ${st.s === 'done' ? 'on' : ''}" data-act="quest" data-q="${attr(q.name)}" aria-pressed="${st.s === 'done'}" aria-label="Mark ${attr(q.name)} done">${icon('check')}</button>

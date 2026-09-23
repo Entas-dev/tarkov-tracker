@@ -42,7 +42,9 @@ function buildIndexes() {
   const indeg = {}; const out = {};
   for (const q of Object.values(Q)) { indeg[q.name] = 0; out[q.name] = []; }
   for (const q of Object.values(Q)) for (const g of q.pre) for (const a of g) { if (out[a.q]) { out[a.q].push(q.name); indeg[q.name]++; } }
-  const key = (n) => { const q = Q[n]; const ti = TRADER_ORDER.indexOf(q.trader); return [(q.minLevel || 0), ti < 0 ? 99 : ti, n]; };
+  const effLevel = (q) => Math.max(q.minLevel || 0, (q.ll && D.traders[q.ll.trader]?.ll?.find(l => l.level === q.ll.level)?.pmcLevel) || 0);
+  IX.effLevel = (n) => effLevel(Q[n]);
+  const key = (n) => { const q = Q[n]; const ti = TRADER_ORDER.indexOf(q.trader); return [effLevel(q), ti < 0 ? 99 : ti, n]; };
   const cmp = (a, b) => { const A = key(a), B = key(b); for (let i = 0; i < 3; i++) { if (A[i] < B[i]) return -1; if (A[i] > B[i]) return 1; } return 0; };
   let ready = Object.keys(indeg).filter(n => indeg[n] === 0).sort(cmp);
   const order = [];

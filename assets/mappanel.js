@@ -173,6 +173,7 @@ async function showMap(key) {
     }
   }
   leafletMap.fitBounds(b);
+  setTimeout(() => { leafletMap?.invalidateSize(); if (!focusQuest) leafletMap?.fitBounds(b); }, 80);
   markerLayer = L.layerGroup().addTo(leafletMap);
   extractLayer = L.layerGroup().addTo(leafletMap);
   renderList();

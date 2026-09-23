@@ -99,7 +99,10 @@ select { cursor: pointer; }
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; margin-bottom: 16px; }
 .panel-h { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-@media (max-width: 800px) { .grid2 { grid-template-columns: 1fr; } }
+.grid12 { display: grid; grid-template-columns: minmax(240px, 1fr) 2fr; gap: 16px; }
+@media (max-width: 800px) { .grid2, .grid12 { grid-template-columns: 1fr; } }
+.chips.cgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); }
+.tr-ic, .qc-tr, .tt-tr, .tt-big, .ll-ic, .info-tr, .mp-tr { object-fit: cover; object-position: 50% 12%; }
 .sub-h { font-family: var(--font-h); text-transform: uppercase; letter-spacing: .06em; color: var(--accent); font-weight: 600; font-size: 14px; margin: 12px 0 6px; }
 .count-line { color: var(--muted); font-size: 13px; margin: 6px 0; }
 .empty { padding: 30px; text-align: center; color: var(--muted); border: 1px dashed var(--line); border-radius: var(--radius); }
@@ -378,10 +381,12 @@ a.wl:hover { border-bottom-style: solid; }
 
 /* map panel */
 .mappanel { position: fixed; top: 8px; right: 12px; z-index: 50; }
+.mappanel:not(.collapsed) { top: 96px; }
 .mp-toggle { display: inline-flex; align-items: center; gap: 6px; background: var(--accent); color: var(--accent-ink); border: 0; border-radius: var(--radius); padding: 8px 12px; cursor: pointer; font-family: var(--font-h); font-weight: 700; text-transform: uppercase; letter-spacing: .05em; box-shadow: var(--shadow); }
 .mappanel:not(.collapsed) .mp-toggle { display: none; }
 .mappanel.collapsed .mp-box { display: none; }
-.mp-box { width: min(760px, calc(100vw - 24px)); height: min(520px, calc(100vh - 24px)); background: var(--panel); border: 1px solid var(--line2); border-radius: var(--radius); box-shadow: var(--shadow); display: flex; flex-direction: column; overflow: hidden; }
+.mp-box { width: min(760px, calc(100vw - 24px)); height: min(540px, calc(100vh - 110px)); background: var(--panel); border: 1px solid var(--line2); border-radius: var(--radius); box-shadow: var(--shadow); display: flex; flex-direction: column; overflow: hidden; }
+.mappanel.big { top: 8px; }
 .mappanel.big .mp-box { width: calc(100vw - 24px); height: calc(100vh - 16px); }
 .mp-head { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
 .mp-status { flex: 1; min-width: 0; }

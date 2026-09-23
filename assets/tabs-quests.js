@@ -14,7 +14,7 @@ export function renderStory(root) {
   const E = D.endings?.endings || {};
   const ticket = D.chapters['The Ticket'];
   const required = new Set(['The Ticket', ...chapterClosure('The Ticket')]);
-  if (ticket) for (const o of ticket.objectives) if (!o.endings || o.endings.includes(ending)) for (const m of o.html.matchAll(/data-t="([^"]+)"/g)) if (D.chapters[m[1]]) { required.add(m[1]); for (const d of chapterClosure(m[1])) required.add(d); }
+  if (ticket) for (const o of ticket.objectives) if (!o.endings || o.endings.includes(ending)) for (const m of (o.html + (o.cond || '')).matchAll(/data-t="([^"]+)"/g)) if (D.chapters[m[1]]) { required.add(m[1]); for (const d of chapterClosure(m[1])) required.add(d); }
   const order = IX.chapterOrder;
   const reqDone = order.filter(c => required.has(c) && chDone(c, p)).length;
   const reqTotal = order.filter(c => required.has(c)).length;
@@ -99,7 +99,7 @@ function applyFilters(names, prefix, statusDefault = 'open') {
     }
     return true;
   });
-  if (f.sort === 'level') out.sort((a, b) => (D.quests[a].minLevel || 0) - (D.quests[b].minLevel || 0) || IX.rank[a] - IX.rank[b]);
+  if (f.sort === 'level') out.sort((a, b) => IX.effLevel(a) - IX.effLevel(b) || IX.rank[a] - IX.rank[b]);
   else if (f.sort === 'name') out.sort((a, b) => a.localeCompare(b));
   return out;
 }
@@ -129,10 +129,10 @@ export function renderKappa(root) {
   </div>
   ${col ? `<section class="panel">
     <div class="panel-h"><h2>Collector</h2>${statusBadge(questStatus(col, p).s)}<button class="ibtn" data-act="info" data-q="Collector" aria-label="Info">${icon('info')}</button></div>
-    <div class="grid2">
+    <div class="grid12">
       <div><div class="sub-h">Requirements</div><ul class="plain">${col.reqHtml.map(r => `<li class="d${r.depth}">${r.html}</li>`).join('')}</ul>
       <div class="ll-row">${traders.map(t => { const ll = traderLL(t, p); return `<span class="ll-pill ${ll >= 4 ? 'ok' : ''}" data-tip="${attr(t)}: LL${ll} (need 4)">${traderImg(t, 'll-ic')}LL${ll}</span>`; }).join('')}</div></div>
-      <div><div class="sub-h">Items to hand over <span class="muted">(${colHave}/${colNeeds.length})</span></div><div class="chips">${colNeeds.map(n => itemChip(n.item, { count: n.count, have: n.have, fir: n.fir, counter: `Collector|${n.item}` })).join('')}</div></div>
+      <div><div class="sub-h">Items to hand over <span class="muted">(${colHave}/${colNeeds.length})</span></div><div class="chips cgrid">${colNeeds.map(n => itemChip(n.item, { count: n.count, have: n.have, fir: n.fir, counter: `Collector|${n.item}` })).join('')}</div></div>
     </div>
   </section>` : ''}
   ${filterBar('kf', { kappaToggle: false })}
