@@ -17,8 +17,21 @@ const rel = (g) => g.filter(a => a.type === 'complete');
 function buildIndexes() {
   const Q = D.quests;
   IX.names = Object.keys(Q);
+  for (const q of Object.values(Q)) q.pre = (q.prereq || []).map(g => g.filter(a => Q[a.q] && a.q !== q.name)).filter(g => g.length);
+  // "leads to" on the wiki implies the reverse prerequisite; several sources for the same quest form one OR-group
+  const rev = {};
+  for (const a of Object.values(Q)) for (const b of a.leadsTo || []) {
+    const B = Q[b];
+    if (!B || B === a || B.pre.some(g => g.some(x => x.q === a.name))) continue;
+    (rev[b] = rev[b] || []).push({ q: a.name, type: 'complete', fromLeads: true });
+  }
+  for (const [b, alts] of Object.entries(rev)) Q[b].pre.push(alts);
+  // Collector (Kappa) requires every quest the wiki marks as "required for Kappa"
+  if (Q['Collector']) {
+    const C = Q['Collector'];
+    for (const q of Object.values(Q)) if (q.kappa === 'yes' && q.name !== 'Collector' && !q.event && !q.mode && !C.pre.some(g => g.some(x => x.q === q.name))) C.pre.push([{ q: q.name, type: 'complete', kappa: true }]);
+  }
   for (const q of Object.values(Q)) {
-    q.pre = (q.prereq || []).map(g => g.filter(a => Q[a.q] && a.q !== q.name)).filter(g => g.length);
     // seasonal variant
     let pre = q.pre.map(g => g.slice());
     for (const s of q.seasonal || []) {
@@ -93,6 +106,7 @@ function buildIndexes() {
     chDeps[c.name] = deps;
   }
   for (const c of Object.values(CH)) for (const l of c.leadsTo) if (CH[l]) chDeps[l].add(c.name);
+  if (CH['Tour']) for (const n of chNames) if (n !== 'Tour') chDeps[n].add('Tour');
   const chDepth = {};
   const dd = (n, seen = new Set()) => { if (chDepth[n] != null) return chDepth[n]; if (seen.has(n)) return 0; seen.add(n); let d = 0; for (const p of chDeps[n]) d = Math.max(d, dd(p, seen) + 1); return (chDepth[n] = d); };
   chNames.forEach(n => dd(n));

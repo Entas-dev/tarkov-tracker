@@ -79,7 +79,10 @@ export function questTooltip(name) {
   const ok = (b) => b ? `<span class="t-ok">${icon('check')}</span>` : `<span class="t-no">${icon('x')}</span>`;
   if (q.minLevel) rows.push(`${ok(p.settings.level >= q.minLevel)} PMC level ${q.minLevel}`);
   if (q.ll) rows.push(`${ok(traderLL(q.ll.trader, p) >= q.ll.level)} ${esc(q.ll.trader)} LL${q.ll.level}`);
+  const kapG = preOf(q).filter(g => g.every(a => a.kappa));
+  if (kapG.length) { const vis = kapG.filter(g => visible(D.quests[g[0].q], p)); const dn = vis.filter(g => groupSatisfied(g, p)).length; rows.push(`${ok(dn === vis.length)} All Kappa-required quests <span class="muted">(${dn}/${vis.length} done)</span>`); }
   for (const g of preOf(q)) {
+    if (g.every(a => a.kappa)) continue;
     const sat = groupSatisfied(g, p);
     rows.push(`${ok(sat)} ${g.map(a => `${a.type === 'accept' ? 'Accept ' : a.type === 'fail' ? 'Fail ' : ''}<b>${esc(a.q)}</b>${a.delay ? ` <span class="muted">(+${esc(a.delay)})</span>` : ''}`).join(' <span class="muted">or</span> ')}`);
   }

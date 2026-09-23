@@ -1,6 +1,6 @@
 // App bootstrap, header, routing, global actions
 import { store, PROFILES } from './store.js';
-import { D, IX, setDataset, P, visible, isDone, completeQuest, doneDependents, uncompleteQuests, questObjProgress, objKey, chapterClosure, chDone, chapterProgress, hLevel, setModuleLevel, hideoutDependents, objVisibleForEnding, questStatus } from './model.js';
+import { D, IX, setDataset, P, visible, isDone, completeQuest, prerequisiteClosure, doneDependents, uncompleteQuests, questObjProgress, objKey, chapterClosure, chDone, chapterProgress, hLevel, setModuleLevel, hideoutDependents, objVisibleForEnding, questStatus } from './model.js';
 import { esc, attr, icon, img, initTooltips, hideTip, confirmDialog, toast, $, $$ } from './ui.js';
 import { expanded, openQuestInfo, openChapterInfo, openItemInfo, openWikiPage, openModuleInfo, closeDrawer } from './components.js';
 import { renderStory, renderKappa, renderTraders, renderQuests } from './tabs-quests.js';
@@ -142,7 +142,14 @@ async function toggleObjective(qname, oid) {
     store.update(p => { for (const n of reset) delete p.quests[n]; for (const o of q.objectives) p.obj[objKey(qname, o.id)] = 1; delete p.obj[key]; });
     return;
   }
-  store.update(p => { if (p.obj[key]) delete p.obj[key]; else p.obj[key] = 1; });
+  if (P().obj[key]) { store.update(p => { delete p.obj[key]; }); return; }
+  // checking an objective: its sub-steps are done, "hand over X" implies "find X", and the quest's prerequisites must be done
+  const o = q.objectives.find(x => x.id === oid);
+  const extra = descendants(q.objectives, oid);
+  if (o?.kind === 'handover') for (const x of q.objectives) if (x.kind === 'find' && x.items?.some(i => o.items?.some(j => j.item === i.item))) extra.push(x.id, ...descendants(q.objectives, x.id));
+  const pre = [...prerequisiteClosure(qname)].filter(n => !isDone(n));
+  store.update(p => { p.obj[key] = 1; for (const id of extra) p.obj[objKey(qname, id)] = 1; for (const n of pre) p.quests[n] = 1; });
+  if (pre.length) toast(`${pre.length} prerequisite quest${pre.length > 1 ? 's' : ''} of <b>${esc(qname)}</b> checked too`);
   const pr = questObjProgress(q);
   if (pr.total && pr.done === pr.total) { const n = completeQuest(qname); toast(`All objectives done – <b>${esc(qname)}</b> completed${n ? ` (+${n} prerequisites)` : ''}`); }
 }
@@ -164,11 +171,30 @@ async function toggleChapter(name) {
   store.update(p => { for (const c of reset) delete p.ch[c]; });
 }
 
+function descendants(list, id) {
+  const out = [];
+  const walk = (pid) => { for (const x of list) if (x.parent === pid && !out.includes(x.id)) { out.push(x.id); walk(x.id); } };
+  walk(id);
+  return out;
+}
+const isBranchCond = (c) => !!c && /^(if|only if)\b/i.test(c.replace(/<[^>]+>/g, '').trim());
+
 function toggleChObj(cname, oid) {
   const c = D.chapters[cname];
   const key = `${cname}|${oid}`;
   if (chDone(cname)) { store.update(p => { delete p.ch[cname]; for (const o of c.objectives) p.chObj[`${cname}|${o.id}`] = 1; delete p.chObj[key]; }); return; }
-  store.update(p => { if (p.chObj[key]) delete p.chObj[key]; else p.chObj[key] = 1; });
+  if (P().chObj[key]) { store.update(p => { delete p.chObj[key]; }); return; }
+  // story objectives are sequential: checking one checks everything before it on your ending path (skipping alternative "If …" branches),
+  // its own sub-steps, and all earlier chapters this chapter depends on
+  const ending = P().settings.ending;
+  const idx = c.objectives.findIndex(x => x.id === oid);
+  const o = c.objectives[idx];
+  const prev = c.objectives.slice(0, idx).filter(x => !x.optional && objVisibleForEnding(x, ending) && (!isBranchCond(x.cond) || x.cond === o.cond || (x.parent && x.parent === o.parent)));
+  const ids = [oid, ...prev.map(x => x.id), ...descendants(c.objectives, oid)];
+  const chs = [...chapterClosure(cname)].filter(n => !chDone(n));
+  store.update(p => { for (const id of ids) p.chObj[`${cname}|${id}`] = 1; for (const n of chs) p.ch[n] = 1; });
+  const extra = ids.length - 1;
+  if (extra || chs.length) toast(`${extra ? `${extra} earlier objective${extra > 1 ? 's' : ''}` : ''}${extra && chs.length ? ' and ' : ''}${chs.length ? `chapter${chs.length > 1 ? 's' : ''} ${chs.map(esc).join(', ')}` : ''} checked too`);
   const pr = chapterProgress(c);
   if (pr.total && pr.done === pr.total) { toggleChapter(cname); }
 }
