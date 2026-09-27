@@ -544,3 +544,6 @@ a.wl:hover { border-bottom-style: solid; }
 .sp-t td:last-child { text-align: right; white-space: nowrap; }
 .mappanel.loot .mp-body { grid-template-columns: 1fr 360px; }
 @media (max-width: 700px) { .mappanel.loot .mp-body { grid-template-columns: 1fr; } }
+.raid-done { opacity: .6; border-left-color: var(--ok); }
+.raid-done .raid-n { background: var(--ok); }
+.sr-stale { border-color: var(--accent); }

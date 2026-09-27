@@ -197,6 +197,47 @@ export function planRaids({ maxRaids = 10, expPerRaid = 4000, lootNeeds = null }
   return { raids, prelude: pre, loot: Object.values(loot).sort((a, b) => b.quests.length - a.quests.length) };
 }
 
+// ---------- stored plan (only recalculated on request) ----------
+const PLAN_V = 1;
+function progressSig(p) {
+  const keys = (o) => Object.keys(o || {}).filter(k => o[k]).sort().join(',');
+  const str = [keys(p.quests), keys(p.obj), keys(p.ch), keys(p.chObj), keys(p.active), JSON.stringify(p.hideout || {}), p.settings.level].join('|');
+  let h = 5381;
+  for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0;
+  return String(h >>> 0);
+}
+function serializePlan(plan) {
+  return {
+    raids: plan.raids.map(r => ({ map: r.map, e: r.entries.map(e => (e.kind === 'tour' ? ['T', e.o.id] : [e.q.name, e.o.id])), t: r.turnIns, l: r.lootQuests || [], ta: r.tourAfter.map(o => o.id), lv: r.level, la: r.levelAfter })),
+    pre: { tour: plan.prelude.tour.map(o => o.id), done: plan.prelude.done, loot: plan.prelude.loot },
+    loot: plan.loot,
+  };
+}
+function hydratePlan(d) {
+  const tour = D.chapters?.['Tour'];
+  const tobj = (id) => tour?.objectives.find(o => o.id === id) || null;
+  const qobj = (n, id) => D.quests[n]?.objectives.find(o => o.id === id) || null;
+  const q = (n) => !!D.quests[n];
+  return {
+    raids: d.raids.map(r => ({
+      map: r.map,
+      entries: r.e.map(([a, b]) => (a === 'T' ? (tobj(b) ? { kind: 'tour', o: tobj(b) } : null) : (qobj(a, b) ? { kind: 'quest', q: D.quests[a], o: qobj(a, b) } : null))).filter(Boolean),
+      turnIns: r.t.filter(q), lootQuests: r.l.filter(q), tourAfter: r.ta.map(tobj).filter(Boolean), level: r.lv, levelAfter: r.la,
+    })).filter(r => r.entries.length),
+    prelude: { tour: d.pre.tour.map(tobj).filter(Boolean), done: d.pre.done.filter(q), loot: d.pre.loot.filter(q) },
+    loot: (d.loot || []).filter(a => D.items[a.item]),
+  };
+}
+export function recalcSpeedrun() {
+  const all = { ...(store.ui.srPlans || {}) };
+  delete all[store.active];
+  store.setUi('srPlans', all);
+}
+function agoText(t) {
+  const m = Math.round((Date.now() - t) / 60000);
+  return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 48 * 60 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} days ago`;
+}
+
 // ---------- tab ----------
 export function renderSpeedrun(root) {
   const p = P();
@@ -204,8 +245,19 @@ export function renderSpeedrun(root) {
   const t0 = performance.now();
   const ld = lootData();
   if (!ld && lootState() !== 'missing') ensureLoot();
-  const needs0 = ld ? neededLoot(p) : null;
-  const plan = planRaids({ maxRaids: ui.n, expPerRaid: ui.exp, lootNeeds: needs0 });
+  const sig = progressSig(p);
+  let stored = store.ui.srPlans?.[store.active];
+  let plan = null;
+  if (stored && stored.v === PLAN_V && stored.n === ui.n && stored.exp === ui.exp) { try { plan = hydratePlan(stored.data); } catch (e) { console.warn('stored plan unreadable', e); plan = null; } }
+  if (!plan) {
+    const needs0 = ld ? neededLoot(p) : null;
+    plan = planRaids({ maxRaids: ui.n, expPerRaid: ui.exp, lootNeeds: needs0 });
+    stored = { v: PLAN_V, n: ui.n, exp: ui.exp, at: Date.now(), sig, data: serializePlan(plan) };
+    store.setUi('srPlans', { ...(store.ui.srPlans || {}), [store.active]: stored });
+  }
+  const stale = stored.sig !== sig;
+  const entryDone = (e) => (e.kind === 'tour' ? !!p.ch['Tour'] || !!p.chObj['Tour|' + e.o.id] : isDone(e.q.name, p) || !!p.obj[e.q.name + '|' + e.o.id]);
+  const raidDone = (r) => r.entries.every(entryDone);
   // quests that the plan works on count as "soon" for item priorities
   const soon = new Set();
   for (const r of plan.raids) { for (const e of r.entries) if (e.q) soon.add(e.q.name); r.turnIns.forEach(n => soon.add(n)); (r.lootQuests || []).forEach(n => soon.add(n)); }
@@ -225,7 +277,7 @@ export function renderSpeedrun(root) {
     return Object.values(items);
   };
   root.innerHTML = `
-  <div class="tab-head"><div><h1>Speedrun Guide</h1><p class="lede">Your next raids, planned from your current progress: every objective that can be done on the same map is bundled into one raid – across all traders and the Tour chapter. Tick objectives here or anywhere else and the plan recalculates.</p></div>
+  <div class="tab-head"><div><h1>Speedrun Guide</h1><p class="lede">Your next raids, planned from your current progress: every objective that can be done on the same map is bundled into one raid – across all traders and the Tour chapter. Tick objectives here or anywhere else – the plan stays put until you press <b>Recalculate</b>.</p></div>
     <div class="head-stat"><div class="stat"><b>${plan.raids.length}</b> raids · <b>${totalObj}</b> objectives · <b>${totalQ}</b> quests finished</div></div></div>
   <div class="notice">${icon('list')}<div>Quicker than ticking finished quests: <b>tell the tracker which quests are open in your game</b> and it marks everything before them as done. <button class="btn btn-s btn-p" data-act="active-setup">Set my open quests</button></div></div>
   <div class="filters">
@@ -233,7 +285,10 @@ export function renderSpeedrun(root) {
     <div class="seg" role="radiogroup" aria-label="Number of raids">${[5, 10, 20, 40].map(n => `<button role="radio" aria-checked="${ui.n === n}" class="seg-b ${ui.n === n ? 'on' : ''}" data-act="sr" data-k="n" data-v="${n}">${n} raids</button>`).join('')}</div>
     <span class="small muted" data-tip="EXP you earn per raid besides quest rewards (kills, looting, survival). Used to estimate when level-gated quests unlock. 'off' keeps your current level for the whole plan.">Level-ups</span>
     <div class="seg" role="radiogroup" aria-label="EXP per raid">${[[0, 'off'], [1500, 'low'], [4000, 'normal'], [8000, 'high']].map(([v, l]) => `<button role="radio" aria-checked="${ui.exp === v}" class="seg-b ${ui.exp === v ? 'on' : ''}" data-act="sr" data-k="exp" data-v="${v}">${l}</button>`).join('')}</div>
+    <button class="btn ${stale ? 'btn-p' : ''}" data-act="sr-recalc" data-tip="Plan again from your current progress">${icon('refresh')} Recalculate</button>
+    <span class="small muted">planned ${agoText(stored.at)}</span>
   </div>
+  ${stale ? `<div class="notice sr-stale">${icon('refresh')}<div>Your progress changed since this plan was made. Ticks show up here, but the raid order stays as it is until you press <b>Recalculate</b>. <button class="btn btn-s btn-p" data-act="sr-recalc">Recalculate now</button></div></div>` : ''}
   ${plan.prelude.tour.length || plan.prelude.done.length || plan.prelude.loot.length ? `<section class="panel sr-pre"><div class="panel-h"><h2>Right now, before your next raid</h2></div>
     ${plan.prelude.tour.length ? `<div class="sub-h">Tour steps at the traders</div><ul class="plain">${plan.prelude.tour.map(o => `<li>${o.html}</li>`).join('')}</ul>` : ''}
     ${plan.prelude.loot.length ? `<div class="sub-h">Collect the items and hand in</div><div class="chips">${plan.prelude.loot.map(n => `<span class="chip">${traderImg(D.quests[n].trader, 'chip-img')}${qlink(n)}</span>`).join('')}</div>` : ''}
@@ -247,8 +302,9 @@ export function renderSpeedrun(root) {
     const lt = raidLoot[i];
     const ltTop = lt.filter(x => x.prio >= 2).slice(0, 8);
     const ltRest = lt.filter(x => !ltTop.includes(x)).slice(0, 30);
-    return `<li class="raid">
-      <div class="raid-h"><span class="raid-n">${i + 1}</span><div class="raid-t"><h2>${esc(r.map)}</h2><div class="small muted">${r.entries.length} objective${r.entries.length > 1 ? 's' : ''} · ${Object.keys(byQ).length} quest${Object.keys(byQ).length !== 1 ? 's' : ''}${tourE.length ? ' + Tour' : ''} · est. level ${r.level}${r.levelAfter > r.level ? ` → ${r.levelAfter}` : ''}</div></div>
+    const rDone = raidDone(r);
+    return `<li class="raid ${rDone ? 'raid-done' : ''}">
+      <div class="raid-h"><span class="raid-n">${i + 1}</span><div class="raid-t"><h2>${esc(r.map)}${rDone ? ' <span class="badge b-done">' + icon('check') + 'Done</span>' : ''}</h2><div class="small muted">${r.entries.length} objective${r.entries.length > 1 ? 's' : ''} · ${Object.keys(byQ).length} quest${Object.keys(byQ).length !== 1 ? 's' : ''}${tourE.length ? ' + Tour' : ''} · est. level ${r.level}${r.levelAfter > r.level ? ` → ${r.levelAfter}` : ''}</div></div>
         <button class="btn btn-s" data-act="map" data-map="${attr(r.map)}">${icon('map')} Map</button></div>
       ${br.length ? `<div class="raid-bring"><span class="small muted">Bring:</span> ${br.map(b => itemChip(b.item, { count: b.count, small: true })).join('')}</div>` : ''}
       <div class="raid-b">

@@ -6,6 +6,7 @@ import { D, P, shoppingList, questStatus, hLevel, isDone, levelReqStatus } from 
 // Heuristic weights for "expected finds per raid": a loose spot spawns something only sometimes and picks one
 // of its candidates; a container rolls a few items from its loot table. Only used for ranking, never shown as odds.
 const LOOSE_W = 0.3, CONT_W = 1.5;
+const MIN_SCORE = 0.15; // below this an item is too rare on a map to plan around it
 // tarkov.dev variants that duplicate a main map – left out of "best map" rankings
 const VARIANTS = new Set(['ground-zero-21', 'ground-zero-tutorial', 'night-factory', 'the-lab-dark', 'terminal']);
 const NAMES = { 'streets-of-tarkov': 'Streets of Tarkov', 'ground-zero': 'Ground Zero', 'ground-zero-21': 'Ground Zero 21+', 'the-lab': 'The Lab', 'the-labyrinth': 'The Labyrinth', 'night-factory': 'Night Factory', 'the-lab-dark': 'The Lab (dark)' };
@@ -157,7 +158,7 @@ export function lootForMap(mapName, needs) {
   const out = [];
   for (const n of needs) {
     const f = findability(k, n.li);
-    if (!f || f.score <= 0) continue;
+    if (!f || f.score < MIN_SCORE) continue; // e.g. a rifle that is one of 1,800 weapon-box entries
     const best = bestMaps(n.li);
     const top = best[0]?.score || f.score;
     const rel = f.score / top;
@@ -166,7 +167,7 @@ export function lootForMap(mapName, needs) {
     if (rank > 2 && rel < 0.6 && !(f.loose && n.prio === 3)) continue;
     out.push({ ...n, f, rel, best: rank === 0, rank });
   }
-  return out.sort((a, b) => b.prio - a.prio || b.rel - a.rel || b.missing - a.missing);
+  return out.sort((a, b) => b.prio - a.prio || b.f.score * (0.5 + b.rel) - a.f.score * (0.5 + a.rel) || b.missing - a.missing);
 }
 
 // ---------- full loot list of one map (map panel) ----------

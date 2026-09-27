@@ -9,7 +9,7 @@ import { loadDataset, buildLive, isStale, ageText, loadGameReqs } from './data.j
 let gameReqs = null;
 import { initMapPanel, openMap, openMapLoot } from './mappanel.js';
 import { perksBannerHtml, openPerks, togglePerk } from './perks.js';
-import { renderSpeedrun, openActiveSetup } from './speedrun.js';
+import { renderSpeedrun, openActiveSetup, recalcSpeedrun } from './speedrun.js';
 
 const TABS = [
   { id: 'story', label: 'Main Story', render: renderStory },
@@ -353,6 +353,7 @@ function onClick(e) {
     }
     case 'active-clear': store.update(pp => { pp.active = {}; }); break;
     case 'sr': store.setUi('sr', { ...(store.ui.sr || { n: 10, exp: 4000 }), [b.dataset.k]: +b.dataset.v }); render(); break;
+    case 'sr-recalc': recalcSpeedrun(); render(); toast('Speedrun plan recalculated from your current progress'); break;
     case 'prestige': { const l = +b.dataset.l; store.update(pp => { if (pp.prestige[l]) { for (const k of Object.keys(pp.prestige)) if (+k >= l) delete pp.prestige[k]; } else for (let i = 1; i <= l; i++) pp.prestige[i] = 1; }); break; }
     case 'pman': store.update(pp => { const k = b.dataset.k; if (pp.prestigeManual[k]) delete pp.prestigeManual[k]; else pp.prestigeManual[k] = 1; }); break;
     case 'bp': store.update(pp => { const l = b.dataset.l; if (pp.bp[l]) delete pp.bp[l]; else pp.bp[l] = 1; }); break;
