@@ -741,3 +741,9 @@ input[type=number], input[type=search], select { background: var(--bg2); border-
   .ts-bar { gap: 6px 12px; }
   .ts-cb { font-size: 15px; }
 }
+.ts-chic { width: 26px; height: 26px; object-fit: contain; filter: brightness(1.4) grayscale(.3); }
+.ts-row.sel .ts-chic { filter: invert(1) grayscale(1); }
+.td-chic { width: 36px; height: 36px; object-fit: contain; }
+.td-sec blockquote { margin: 0; }
+.td .obj-sec { font-size: 16px; margin: 10px 0 2px; padding-top: 6px; }
+.td .obj-cond { margin: 8px 0 2px; }

@@ -4,7 +4,7 @@ import { D, IX, P, ENDINGS, condStatus, traderUnlocked, visible, questStatus, is
 import { esc, attr, icon, img, traderImg, qlink, itemChip, progressBar, fmt, statusBadge } from './ui.js';
 import { questCard, objectiveRows, needsBlock, mapChips, expanded } from './components.js';
 import { perksNotesHtml } from './perks.js';
-import { taskScreen } from './tasks.js';
+import { taskScreen, chapterScreen } from './tasks.js';
 
 const ui = () => store.ui;
 const setUi = (k, v) => store.setUi(k, v);
@@ -35,9 +35,7 @@ export function renderStory(root) {
     ${choiceSeg('evidence', 'Major evidence (They Are Already Here)', [['received', 'Received'], ['failed', 'Failed']])}
     <span class="small muted">Used to hide the branches you did not take and to auto-check earlier steps correctly.</span></div>
   ${e ? `<div class="ending-card"><div class="ending-quote">${e.quoteHtml}</div>${e.rewardsHtml?.length ? `<details><summary>${esc(ending)} rewards</summary><ul>${e.rewardsHtml.map(r => `<li>${r}</li>`).join('')}</ul></details>` : ''}</div>` : ''}
-  <div class="chapters">
-    ${order.map(n => chapterCard(D.chapters[n], required.has(n), ending)).join('')}
-  </div>`;
+  ${chapterScreen({ order, required, ending })}`;
 }
 
 function choiceSeg(k, label, opts) {

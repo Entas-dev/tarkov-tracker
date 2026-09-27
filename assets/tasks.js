@@ -201,3 +201,68 @@ export function initTaskKeys() {
     requestAnimationFrame(() => document.querySelector(`.ts-list [data-q="${CSS.escape(q)}"]`)?.focus());
   });
 }
+
+// ---------- story chapters in the same layout ----------
+export function chapterScreen({ order, required, ending }) {
+  const id = 'story';
+  const p = P();
+  const s = tsState(id);
+  const rows = order.map(n => D.chapters[n]).filter(Boolean).map(c => {
+    const done = !!p.ch[c.name];
+    const pr = chapterProgressLite(c, p, ending);
+    return { c, done, pr, req: required.has(c.name) };
+  }).filter(r => s.sc || !r.done);
+  const sel = rows.find(r => r.c.name === s.sel) ? s.sel : (rows.find(r => r.req && !r.done) || rows[0])?.c.name || '';
+  const grp = (title, badge, list, key) => {
+    if (!list.length) return '';
+    const col = !!s.col[key];
+    const all = order.filter(n => D.chapters[n] && (key === 'req') === required.has(n));
+    const dn = all.filter(n => p.ch[n]).length;
+    return `<section class="ts-grp"><button class="ts-gh" data-act="ts-grp" data-id="${id}" data-g="${key}" aria-expanded="${!col}"><span class="ts-roman">${badge}</span><span class="ts-gl">${title}</span><span class="ts-gc">${dn}/${all.length}</span><span class="ts-chev ${col ? 'col' : ''}">${icon('chevron')}</span></button>
+      ${col ? '' : `<div class="ts-rows">${list.map(r => `<button class="ts-row ${r.done ? 'st-done' : 'st-available'} ${r.c.name === sel ? 'sel' : ''}" data-act="ts-sel" data-id="${id}" data-q="${attr(r.c.name)}" role="option" aria-selected="${r.c.name === sel}">
+        <span class="ts-ti">${r.done ? icon('check') : img(r.c.iconImg, '', 'ts-chic')}</span><span class="ts-name">${esc(r.c.name)}</span><span class="ts-hint">${r.pr.done}/${r.pr.total}</span><span class="ts-go">${icon('chevron')}</span></button>`).join('')}</div>`}</section>`;
+  };
+  const selC = sel ? D.chapters[sel] : null;
+  return `<div class="ts" data-ts="${id}">
+    <div class="ts-bar">
+      <label class="ts-cb"><input type="checkbox" data-tsopt="sc" data-id="${id}" ${s.sc ? 'checked' : ''}><span class="ts-box">${icon('check')}</span>Show completed</label>
+    </div>
+    <div class="ts-body">
+      <div class="ts-list" role="listbox" aria-label="Story chapters" data-keep="ts-list-${id}">
+        ${grp(`Required for ${esc(ending)}`, '!', rows.filter(r => r.req), 'req')}
+        ${grp('Side chapters', '+', rows.filter(r => !r.req), 'side')}
+        ${rows.length ? '' : '<div class="ts-empty">All chapters done. Tick <b>Show completed</b> to see them.</div>'}
+      </div>
+      <div class="ts-detail" data-keep="ts-detail-${id}" id="ts-detail-${id}">${selC ? chapterDetail(selC, required.has(selC.name), ending) : '<div class="ts-empty">Select a chapter.</div>'}</div>
+    </div>
+  </div>`;
+}
+function chapterProgressLite(c, p, ending) {
+  const vis = c.objectives.filter(o => !o.optional && (!o.endings || o.endings.includes(ending)));
+  const done = p.ch[c.name] ? vis.length : vis.filter(o => p.chObj[`${c.name}|${o.id}`]).length;
+  return { done, total: vis.length };
+}
+function chapterDetail(c, required, ending) {
+  const p = P();
+  const done = !!p.ch[c.name];
+  const pr = chapterProgressLite(c, p, ending);
+  const endRew = c.endingRewards?.[ending];
+  return `<article class="td ${done ? 'st-done' : 'st-available'}">
+    <header class="td-h">
+      <span class="td-type">${img(c.iconImg, '', 'td-chic')}</span>
+      <div class="td-ht"><h2>${esc(c.name)}</h2><div class="td-sub"><span>Story chapter</span>${c.maps?.length ? `<span class="muted">· ${esc(c.maps.join(', '))}</span>` : ''}</div></div>
+      <span class="td-status ${done ? 's-done' : 's-available'}">${done ? 'Completed' : required ? 'Required' : 'Side chapter'}</span>
+    </header>
+    ${c.img ? `<div class="td-img">${img(c.img, c.name, 'td-banner')}</div>` : ''}
+    <div class="td-actions">
+      <button class="btn ${done ? '' : 'btn-p'}" data-act="chapter" data-c="${attr(c.name)}">${icon('check')} ${done ? 'Mark not done' : 'Complete chapter'}</button>
+      ${c.maps?.length ? `<button class="btn" data-act="map" data-map="${attr(c.maps[0])}">${icon('map')} Map</button>` : ''}
+      <button class="btn" data-act="info-ch" data-c="${attr(c.name)}">${icon('info')} Guide</button>
+    </div>
+    ${c.descHtml ? `<section class="td-sec"><blockquote>${c.descHtml}</blockquote></section>` : ''}
+    ${c.reqHtml?.length ? `<section class="td-sec"><h3>Unlock</h3><div class="td-req">${c.reqHtml.map(r => `<div>${r}</div>`).join('')}</div></section>` : ''}
+    <section class="td-sec"><h3>Objectives <span class="muted">${pr.done}/${pr.total}</span></h3>${objectiveRows(c, { chapter: true, ending })}</section>
+    ${needsBlock(c, { chapter: true, ending }).replace('<div class="sub-h">Items</div>', '<h3>Items</h3>').replace('class="needs"', 'class="needs td-sec"')}
+    ${c.rewardsHtml?.length || endRew ? `<section class="td-sec"><h3>Rewards</h3><ul class="td-rew">${[...(c.rewardsHtml || []), ...(endRew || [])].map(r => `<li>${r.html}</li>`).join('')}</ul></section>` : ''}
+  </article>`;
+}
