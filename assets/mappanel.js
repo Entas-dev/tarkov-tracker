@@ -60,6 +60,7 @@ export function initMapPanel() {
     const ls = e.target.closest('[data-mpls]');
     if (ls) { const k = ls.dataset.mpls, v = ls.dataset.v; store.setUi(k, k === 'mplLim' ? (store.ui.mplLim || 80) + 150 : v); renderList(); }
   });
+  panel.addEventListener('toggle', (e) => { if (e.target.matches?.('.ml-cd')) store.setUi('mplC', e.target.open); }, true);
   panel.addEventListener('input', (e) => {
     const q = e.target.closest('[data-mplq]');
     if (q) { store.setUi('mplq', q.value); clearTimeout(qT); qT = setTimeout(() => { const pos = q.selectionStart; renderList(); const nq = listEl.querySelector('[data-mplq]'); if (nq) { nq.focus(); try { nq.setSelectionRange(pos, pos); } catch { } } }, 180); }
@@ -267,10 +268,11 @@ function renderLootList() {
   else if (sort === 'chance') rows.sort((a, b) => b.score - a.score);
   else rows.sort((a, b) => (needs.get(b.i)?.prio || 0) - (needs.get(a.i)?.prio || 0) || b.score - a.score);
   const seg = (k, cur, opts) => `<div class="seg seg-s">${opts.map(([v, l]) => `<button class="seg-b ${cur === v ? 'on' : ''}" data-mpls="${k}" data-v="${v}">${l}</button>`).join('')}</div>`;
+  if (hl.item != null) { const k = rows.findIndex(r => r.i === hl.item); if (k > 0) rows.unshift(...rows.splice(k, 1)); }
   const nNeeded = ml.items.filter(r => needs.has(r.i)).length;
   listEl.innerHTML = viewTabs(nq) + `
     <div class="mp-lh"><b>${esc(displayName(curKey))}</b> · ${fmt(ml.items.length)} items can spawn · ${fmt(ml.looseSpots)} loose spots · ${fmt(ml.contCount)} containers · <b class="c-acc">${nNeeded}</b> you need</div>
-    <div class="ml-conts">${ml.conts.map(c => `<button class="chip chip-s ml-c ${hl.cont === c.name ? 'on' : ''}" data-mpc="${attr(c.name)}" data-tip="${attr(c.size ? `Loot table (wiki): ${c.size} possible items – click to show all ${c.n} on the map` : 'No loot table on the wiki – click to show positions')}">${esc(c.name)} <span class="ic-count">${c.n}</span></button>`).join('')}</div>
+    <details class="ml-cd" ${store.ui.mplC ? 'open' : ''}><summary class="small">Containers on this map (${ml.conts.length} types)${hl.cont ? ` · showing ${esc(hl.cont)}` : ''}</summary><div class="ml-conts">${ml.conts.map(c => `<button class="chip chip-s ml-c ${hl.cont === c.name ? 'on' : ''}" data-mpc="${attr(c.name)}" data-tip="${attr(c.size ? `Loot table (wiki): ${c.size} possible items – click to show all ${c.n} on the map` : 'No loot table on the wiki – click to show positions')}">${esc(c.name)} <span class="ic-count">${c.n}</span></button>`).join('')}</div></details>
     <div class="ml-bar">
       <label class="search search-s">${icon('search')}<input type="search" data-mplq placeholder="Search loot" value="${attr(store.ui.mplq || '')}" aria-label="Search loot on this map"></label>
       ${seg('mplSrc', src, [['all', 'All'], ['loose', 'Loose'], ['needed', 'Needed']])}

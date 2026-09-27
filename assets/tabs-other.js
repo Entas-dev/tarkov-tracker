@@ -4,6 +4,7 @@ import { D, IX, P, hLevel, moduleMax, levelReqStatus, hcntKey, isSeasonal, isPvE
 import { esc, attr, icon, img, qlink, itemChip, progressBar, fmt, statusBadge, traderImg } from './ui.js';
 import { expanded } from './components.js';
 import { skillReqStatus, perksNotesHtml } from './perks.js';
+import { lootData, lootState, ensureLoot, itemIndex, bestMaps, mapDisplayName } from './loot.js';
 
 const ui = () => store.ui;
 
@@ -147,6 +148,9 @@ export function renderItems(root) {
   const shown = list.filter(a => !q || a.item.toLowerCase().includes(q));
   const firTotal = shown.reduce((s, a) => s + a.fir, 0);
   const lim = ui().iLim || 150;
+  const ld = lootData();
+  if (!ld && lootState() === 'idle') ensureLoot();
+  const where = (item) => { if (!ld) return ''; const bm = bestMaps(itemIndex(item)).slice(0, 3); return bm.length ? `<div class="i-where small muted">Best maps: ${bm.map(b => esc(mapDisplayName(b.key))).join(', ')}</div>` : ''; };
   root.innerHTML = `
   <div class="tab-head"><div><h1>Needed Items</h1><p class="lede">Everything you still need across unfinished quests, story and hideout. Don't sell these.</p></div>
     <div class="head-stat"><div class="stat"><b>${shown.length}</b> different items · <b>${fmt(shown.reduce((s, a) => s + a.need - a.have, 0))}</b> pieces · <b class="c-red">${fmt(firTotal)}</b> must be FiR</div></div></div>
@@ -161,7 +165,7 @@ export function renderItems(root) {
   <div class="ilist">${shown.slice(0, lim).map(a => { const I = D.items[a.item] || {}; const miss = a.need - a.have; return `<div class="irow">
     ${img(I.img, a.item, 'i-ic')}
     <div class="i-main"><div class="i-name"><span class="chip-name" data-item="${attr(a.item)}" data-tip-item="${attr(a.item)}">${esc(a.item)}</span></div>
-      <div class="i-src small">${a.sources.slice(0, 6).map(s => `<span class="src">${s.type === 'hideout' ? `${esc(s.name)} L${s.level}` : s.type === 'chapter' ? `<a class="wl" data-t="${attr(s.name)}">${esc(s.name)}</a>` : qlink(s.name)} ×${fmt(s.count - (s.have || 0))}${s.fir ? ' <span class="fir">FiR</span>' : ''}</span>`).join('')}${a.sources.length > 6 ? `<span class="muted">+${a.sources.length - 6} more</span>` : ''}</div></div>
+      <div class="i-src small">${a.sources.slice(0, 6).map(s => `<span class="src">${s.type === 'hideout' ? `${esc(s.name)} L${s.level}` : s.type === 'chapter' ? `<a class="wl" data-t="${attr(s.name)}">${esc(s.name)}</a>` : qlink(s.name)} ×${fmt(s.count - (s.have || 0))}${s.fir ? ' <span class="fir">FiR</span>' : ''}</span>`).join('')}${a.sources.length > 6 ? `<span class="muted">+${a.sources.length - 6} more</span>` : ''}</div>${where(a.item)}</div>
     <div class="i-num"><b>${fmt(miss)}</b>${a.fir ? `<span class="fir">${fmt(a.fir)} FiR</span>` : ''}</div>
     <button class="ibtn" data-act="info-item" data-item="${attr(a.item)}" aria-label="Where to find">${icon('info')}</button>
   </div>`; }).join('') || '<div class="empty">Nothing left to collect for this scope.</div>'}</div>
