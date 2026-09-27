@@ -1,7 +1,7 @@
 // Speedrun planner: simulates your progression raid by raid and bundles every quest objective
 // (all traders + the Tour story chapter) that can be done on the same map into one raid.
 import { store } from './store.js';
-import { D, IX, P, visible, questStatus, isDone, mapUnlocked, traderUnlocked } from './model.js';
+import { D, IX, P, visible, questStatus, isDone, mapUnlocked, traderUnlocked, traderLL } from './model.js';
 import { esc, attr, icon, img, traderImg, qlink, itemChip, fmt, progressBar } from './ui.js';
 import { openPanel } from './components.js';
 import { lootData, ensureLoot, lootState, neededLoot, lootForMap, whereText, itemImg, lootItem, bestMaps, mapDisplayName } from './loot.js';
@@ -363,24 +363,37 @@ export function openActiveSetup() {
   const q = (store.ui.asq || '').toLowerCase().trim();
   const act = p.active || {};
   const nAct = Object.keys(act).filter(n => D.quests[n] && !isDone(n, p)).length;
+  const minLv = Math.max(0, ...Object.keys(act).filter(n => D.quests[n]).map(n => D.quests[n].minLevel || 0));
+  const llSel = (t) => {
+    if (!D.traders[t]?.ll?.length || t === 'Fence') return '';
+    const man = p.settings.ll?.[t];
+    const cur = traderLL(t, p);
+    return `<span class="as-ll small"><span class="muted">LL</span>${[1, 2, 3, 4].map(l => `<button class="as-llb ${man != null && +man === l ? 'on' : ''}" data-act="setll" data-t="${attr(t)}" data-l="${l}" aria-label="Loyalty level ${l}">${l}</button>`).join('')}${man == null ? `<span class="muted" data-tip="Estimated from your PMC level – set it to your real loyalty level">auto ${cur}</span>` : `<button class="linkbtn" data-act="setll" data-t="${attr(t)}" data-l="">auto</button>`}</span>`;
+  };
   const groups = IX.traders.map(t => {
     const names = (IX.byTrader[t] || []).filter(n => visible(D.quests[n], p) && (!q || n.toLowerCase().includes(q)));
     if (!names.length) return '';
-    return `<div class="as-g"><div class="sub-h">${traderImg(t, 'mp-tr')} ${esc(t)}</div>${names.map(n => {
+    const nOn = names.filter(n => act[n] && !isDone(n, p)).length;
+    return `<div class="as-g"><div class="sub-h as-gh">${traderImg(t, 'mp-tr')} ${esc(t)} ${nOn ? `<span class="badge b-av">${nOn} open</span>` : ''}${llSel(t)}</div>${names.map(n => {
       const done = isDone(n, p), on = !!act[n] && !done;
       return `<label class="as-row ${done ? 'is-done' : ''} ${on ? 'on' : ''}"><input type="checkbox" data-active="${attr(n)}" ${on ? 'checked' : ''}> <span>${esc(n)}</span>${done ? ' <span class="small muted">done</span>' : ''}</label>`;
     }).join('')}</div>`;
   }).join('');
   openPanel(`${icon('list', 'dr-ic')}<span>My open quests</span>`, `
-    <p class="small">Tick every quest that is <b>currently open</b> in your trader task lists. When you press <b>Apply</b>, every quest those depend on (including earlier parts of the same series and the Tour steps that unlock their trader/map) is marked as done – so you never have to tick finished quests one by one.</p>
+    <ol class="as-steps small">
+      <li>In the game open every trader's <b>Tasks</b> with <b>Show completed</b> turned off, and set your <b>PMC level</b>: <input type="number" min="1" max="79" value="${p.settings.level}" data-set="level" class="as-lvl" aria-label="PMC level">${minLv > p.settings.level ? ` <span class="c-orange">your open quests need at least level ${minLv}</span>` : ''}</li>
+      <li>Tick <b>every</b> quest you see there. Also set the <b>loyalty level (LL)</b> you have with each of those traders – quests above your LL then count as "not unlocked yet" instead of finished.</li>
+      <li>Press <b>Apply – this is my full task list</b>.</li>
+    </ol>
+    <p class="small muted">Why the full list matters: many quests (e.g. Ragman's LL1 quests) have no quest before or after them, so the tracker can't tell from one open quest whether another one is finished. If it is not in your in-game list, it is finished – that's what the first button uses.</p>
     <div class="as-bar">
       <label class="search">${icon('search')}<input type="search" data-as="q" placeholder="Search quest name" value="${attr(store.ui.asq || '')}" aria-label="Search quests"></label>
       <span class="small"><b>${nAct}</b> selected</span>
     </div>
     <div class="as-actions">
-      <button class="btn btn-p" data-act="active-apply" data-mode="replace" data-tip="Clears your done list and rebuilds it from the open quests">Apply – rebuild my progress</button>
-      <button class="btn" data-act="active-apply" data-mode="merge" data-tip="Keeps everything you already ticked and adds what the open quests imply">Apply – keep my ticks</button>
-      <button class="btn" data-act="active-apply" data-mode="strict" data-tip="Use this if you ticked EVERY quest in the task list of those traders: anything the tracker thinks is available for them but you did not tick is counted as finished">Apply – list is complete per trader</button>
+      <button class="btn btn-p" data-act="active-apply" data-mode="strict" data-tip="For every trader you ticked quests for: anything the tracker thinks is available but is not in your list is counted as finished (repeated for follow-ups). Your ticks from before are replaced.">Apply – this is my full task list</button>
+      <button class="btn" data-act="active-apply" data-mode="replace" data-tip="Only marks the quests your open quests require (earlier parts, prerequisites). Everything else stays open.">Apply – only what they require</button>
+      <button class="btn" data-act="active-apply" data-mode="merge" data-tip="Keeps everything you already ticked and adds what the open quests require">Apply – keep my ticks</button>
       <button class="btn btn-s" data-act="active-clear">Clear selection</button>
     </div>
     <div class="as-list">${groups || '<div class="empty small">No quest matches.</div>'}</div>`);

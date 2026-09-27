@@ -295,23 +295,38 @@ export function tourStepsFor(names, p = P()) {
   return tour.objectives.slice(0, max + 1).filter(o => !o.optional && !p.chObj[`Tour|${o.id}`]).map(o => o.id);
 }
 
-// "These quests are open in my game" → everything they depend on is done
+// "These quests are open in my game" → everything they depend on is done.
+// strict: the in-game task list (Show completed off) shows EVERY unfinished quest of a trader, so for the traders
+// you entered anything the tracker considers available but you did not tick must be finished – repeated until
+// nothing changes (finishing one can make its follow-ups available). Level and loyalty gates stop the cascade.
 export function applyActiveQuests(mode = 'merge') {
+  const info = { level: null, strict: 0 };
   store.update(p => {
     if (mode === 'replace' || mode === 'strict') { p.quests = {}; }
     const act = Object.keys(p.active || {}).filter(n => D.quests[n]);
     for (const n of act) delete p.quests[n];
+    // an open quest proves you reached its level requirement
+    const minLv = Math.max(0, ...act.map(n => D.quests[n].minLevel || 0));
+    if (minLv > (p.settings.level || 1)) { p.settings.level = minLv; info.level = minLv; }
     const all = new Set();
     for (const n of act) for (const m of prerequisiteClosure(n, p)) if (!p.active[m]) all.add(m);
     for (const m of all) p.quests[m] = 1;
     for (const id of tourStepsFor([...act, ...all], p)) p.chObj[`Tour|${id}`] = 1;
     if (mode === 'strict') {
-      // the trader lists show every available quest: for traders you entered, anything available but not open is finished
       const traders = new Set(act.map(n => D.quests[n].trader));
-      const avail = IX.order.filter(n => !p.quests[n] && !p.active[n] && traders.has(D.quests[n].trader) && visible(D.quests[n], p) && questStatus(D.quests[n], p).s === 'available');
-      for (const n of avail) p.quests[n] = 1;
+      for (let pass = 0; pass < 30; pass++) {
+        let changed = 0;
+        for (const n of IX.order) {
+          const q = D.quests[n];
+          if (p.quests[n] || p.active[n] || !traders.has(q.trader) || !visible(q, p)) continue;
+          if (questStatus(q, p).s !== 'available') continue;
+          p.quests[n] = 1; changed++; info.strict++;
+        }
+        if (!changed) break;
+      }
     }
   }, 'progress');
+  return info;
 }
 
 export function completeQuest(name) {

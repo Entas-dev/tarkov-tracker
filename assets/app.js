@@ -346,9 +346,10 @@ function onClick(e) {
       if (!n) { toast('Tick at least one open quest first'); break; }
       undoSnap = snapshot();
       const before = Object.keys(P().quests).length;
-      applyActiveQuests(b.dataset.mode);
+      const info = applyActiveQuests(b.dataset.mode);
       const after = Object.keys(P().quests).length;
-      withUndo(`${n} open quest${n > 1 ? 's' : ''} set · ${after} quests now marked done${b.dataset.mode === 'merge' ? ` (+${Math.max(0, after - before)})` : ''}`);
+      recalcSpeedrun();
+      withUndo(`${n} open quest${n > 1 ? 's' : ''} set · ${after} quests now marked done${b.dataset.mode === 'merge' ? ` (+${Math.max(0, after - before)})` : ''}${info.strict ? ` · ${info.strict} not in your task list → finished` : ''}${info.level ? ` · level set to ${info.level}` : ''} · Speedrun plan updated`);
       break;
     }
     case 'active-clear': store.update(pp => { pp.active = {}; }); break;

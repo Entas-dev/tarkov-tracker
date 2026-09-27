@@ -547,3 +547,9 @@ a.wl:hover { border-bottom-style: solid; }
 .raid-done { opacity: .6; border-left-color: var(--ok); }
 .raid-done .raid-n { background: var(--ok); }
 .sr-stale { border-color: var(--accent); }
+.as-steps { margin: 0 0 8px; padding-left: 18px; display: grid; gap: 4px; }
+.as-lvl { width: 64px; min-height: 28px; padding: 2px 6px; }
+.as-gh { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.as-ll { margin-left: auto; display: inline-flex; align-items: center; gap: 3px; text-transform: none; letter-spacing: 0; font-family: var(--font); }
+.as-llb { min-width: 24px; height: 24px; border: 1px solid var(--line); background: var(--panel); color: var(--text); border-radius: 2px; cursor: pointer; font-weight: 600; }
+.as-llb.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
