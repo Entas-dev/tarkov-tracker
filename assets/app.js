@@ -10,6 +10,7 @@ let gameReqs = null;
 import { initMapPanel, openMap, openMapLoot } from './mappanel.js';
 import { perksBannerHtml, openPerks, togglePerk } from './perks.js';
 import { renderSpeedrun, openActiveSetup, recalcSpeedrun } from './speedrun.js';
+import { tsState, tsSet, initTaskKeys } from './tasks.js';
 
 const TABS = [
   { id: 'story', label: 'Main Story', render: renderStory },
@@ -97,11 +98,14 @@ function render() {
   const tab = TABS.find(t => t.id === current) || TABS[0];
   const main = $('#main');
   const y = window.scrollY;
-  const focusSel = document.activeElement?.matches?.('input[type=search]') ? { f: document.activeElement.dataset.f || document.activeElement.dataset.af || document.activeElement.dataset.if, pos: document.activeElement.selectionStart } : null;
+  const ae = document.activeElement;
+  const focusSel = ae?.matches?.('input[type=search]') ? { f: ae.dataset.f || ae.dataset.af || ae.dataset.if || ae.dataset.tsq, pos: ae.selectionStart } : null;
+  const keep = {}; main.querySelectorAll('[data-keep]').forEach(el => { keep[el.dataset.keep] = el.scrollTop; });
   hideTip();
   tab.render(main);
   window.scrollTo(0, y);
-  if (focusSel) { const el = main.querySelector(`input[type=search][data-f="${focusSel.f}"],input[type=search][data-af="${focusSel.f}"],input[type=search][data-if="${focusSel.f}"]`); if (el) { el.focus(); try { el.setSelectionRange(focusSel.pos, focusSel.pos); } catch { } } }
+  main.querySelectorAll('[data-keep]').forEach(el => { if (keep[el.dataset.keep] != null) el.scrollTop = keep[el.dataset.keep]; });
+  if (focusSel) { const el = main.querySelector(`input[type=search][data-f="${focusSel.f}"],input[type=search][data-af="${focusSel.f}"],input[type=search][data-if="${focusSel.f}"],input[type=search][data-tsq="${focusSel.f}"]`); if (el) { el.focus(); try { el.setSelectionRange(focusSel.pos, focusSel.pos); } catch { } } }
   renderHeader();
   if (lastDrawer && document.querySelector('.drawer.open')) { const b = $('.drawer-b'); const s = b.scrollTop; const live = b.querySelector('.live')?.innerHTML; lastDrawer(); const nb = $('.drawer-b'); if (live) { const l = nb.querySelector('.live'); if (l) l.innerHTML = live; } nb.scrollTop = s; }
 }
@@ -337,6 +341,17 @@ function onClick(e) {
       break;
     }
     case 'trader': store.setUi('trader', b.dataset.t); render(); break;
+    case 'ts-sel': {
+      hideTip();
+      tsSet(b.dataset.id, { sel: b.dataset.q });
+      render();
+      const det = document.getElementById('ts-detail-' + b.dataset.id);
+      if (det) { det.scrollTop = 0; if (window.innerWidth < 900) det.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+      break;
+    }
+    case 'ts-grp': { const st = tsState(b.dataset.id); tsSet(b.dataset.id, { col: { ...st.col, [b.dataset.g]: !st.col[b.dataset.g] } }); render(); break; }
+    case 'ts-view': tsSet(b.dataset.id, { view: b.dataset.v }); render(); break;
+    case 'ts-active': store.update(pp => { pp.active = pp.active || {}; if (pp.active[b.dataset.q]) delete pp.active[b.dataset.q]; else pp.active[b.dataset.q] = 1; }); break;
     case 'setll': store.update(pp => { pp.settings.ll = pp.settings.ll || {}; if (b.dataset.l === '') delete pp.settings.ll[b.dataset.t]; else pp.settings.ll[b.dataset.t] = +b.dataset.l; }); break;
     case 'hlevel': setHideout(b.dataset.m, +b.dataset.l); break;
     case 'hf': store.setUi('hf', b.dataset.v); render(); break;
@@ -370,6 +385,9 @@ function onClick(e) {
 let searchT = null;
 function onInput(e) {
   const el = e.target;
+  if (el.dataset.tsopt) { tsSet(el.dataset.id, { [el.dataset.tsopt]: el.checked }); render(); return; }
+  if (el.dataset.tsmap != null) { tsSet(el.dataset.tsmap, { map: el.value }); render(); return; }
+  if (el.dataset.tsq != null) { tsSet(el.dataset.tsq, { q: el.value }); clearTimeout(searchT); searchT = setTimeout(render, 160); return; }
   if (el.dataset.as) { store.setUi('asq', el.value); clearTimeout(searchT); searchT = setTimeout(() => { const pos = el.selectionStart; openActiveSetup(); const ni = document.querySelector('input[data-as]'); if (ni) { ni.focus(); try { ni.setSelectionRange(pos, pos); } catch { } } }, 150); return; }
   if (el.dataset.set === 'level') { const v = Math.max(1, Math.min(79, parseInt(el.value, 10) || 1)); store.update(p => { p.settings.level = v; }); return; }
   const fp = el.closest('[data-fprefix]')?.dataset.fprefix;
@@ -388,6 +406,7 @@ async function boot() {
   shell();
   initTooltips();
   initMapPanel();
+  initTaskKeys();
   document.addEventListener('click', onClick);
   document.addEventListener('click', onSettingsClick);
   document.addEventListener('input', (e) => { if (e.target.matches('input[type=search]')) onInput(e); });

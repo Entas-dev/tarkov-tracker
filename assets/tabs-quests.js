@@ -4,6 +4,7 @@ import { D, IX, P, ENDINGS, condStatus, traderUnlocked, visible, questStatus, is
 import { esc, attr, icon, img, traderImg, qlink, itemChip, progressBar, fmt, statusBadge } from './ui.js';
 import { questCard, objectiveRows, needsBlock, mapChips, expanded } from './components.js';
 import { perksNotesHtml } from './perks.js';
+import { taskScreen } from './tasks.js';
 
 const ui = () => store.ui;
 const setUi = (k, v) => store.setUi(k, v);
@@ -128,7 +129,6 @@ export function renderKappa(root) {
   const done = kap.filter(n => isDone(n, p)).length;
   const col = D.quests['Collector'];
   const kItem = D.items['Secure container Kappa'];
-  const names = applyFilters(kap, 'kf');
   const traders = ['Prapor', 'Therapist', 'Skier', 'Peacekeeper', 'Mechanic', 'Ragman', 'Jaeger'];
   const colNeeds = col ? questNeeds(col, p, { includeOptional: false }) : [];
   const colHave = colNeeds.filter(n => n.missing === 0).length;
@@ -146,12 +146,11 @@ export function renderKappa(root) {
       <div><div class="sub-h">Items to hand over <span class="muted">(${colHave}/${colNeeds.length})</span></div><div class="chips cgrid">${colNeeds.map(n => itemChip(n.item, { count: n.count, have: n.have, fir: n.fir, counter: `Collector|${n.item}` })).join('')}</div></div>
     </div>
   </section>` : ''}
-  ${filterBar('kf', { kappaToggle: false })}
-  <div class="count-line">${names.length} quests shown</div>
-  ${listHtml(names, 'kLim')}`;
+  ${taskScreen({ id: 'kappa', names: kap, group: 'trader', showKappaToggle: false })}`;
 }
 
 // ---------------- TRADERS ----------------
+const ROMAN = ['', 'I', 'II', 'III', 'IV'];
 export function renderTraders(root) {
   const p = P();
   const list = IX.traders.filter(t => D.traders[t] || IX.byTrader[t]);
@@ -160,30 +159,22 @@ export function renderTraders(root) {
   const qs = (IX.byTrader[sel] || []).filter(n => visible(D.quests[n], p));
   const done = qs.filter(n => isDone(n, p)).length;
   const ll = traderLL(sel, p);
-  const names = applyFilters(qs, 'tf');
+  const manual = p.settings.ll?.[sel] != null;
   root.innerHTML = `
-  <div class="tab-head"><div><h1>Traders</h1><p class="lede">Quests per trader in unlock order, plus loyalty levels.</p></div></div>
-  <div class="trader-row" role="tablist" aria-label="Traders">
-    ${list.map(t => { const all = (IX.byTrader[t] || []).filter(n => visible(D.quests[n], p)); const d = all.filter(n => isDone(n, p)).length; return `<button role="tab" aria-selected="${t === sel}" class="trader-tab ${t === sel ? 'on' : ''}" data-act="trader" data-t="${attr(t)}">${traderImg(t, 'tt-big')}<span class="tn">${esc(t)}</span><span class="tp">${d}/${all.length}</span></button>`; }).join('')}
+  <div class="tr-strip" role="tablist" aria-label="Traders">
+    ${list.map(t => { const all = (IX.byTrader[t] || []).filter(n => visible(D.quests[n], p)); const d = all.filter(n => isDone(n, p)).length; const locked = IX.tourGates?.[t] && !traderUnlocked(t, p); const tl = traderLL(t, p); return `<button role="tab" aria-selected="${t === sel}" class="tr-card ${t === sel ? 'on' : ''} ${locked ? 'locked' : ''}" data-act="trader" data-t="${attr(t)}">
+      <span class="tr-pic">${traderImg(t, 'tr-portrait')}${D.traders[t]?.ll?.length && t !== 'Fence' ? `<span class="tr-ll">${ROMAN[tl] || tl}</span>` : ''}${locked ? `<span class="tr-lock">${icon('lock')}</span>` : ''}</span>
+      <span class="tr-name">${esc(t)}</span><span class="tr-prog">${d}/${all.length}</span></button>`; }).join('')}
   </div>
   ${perksNotesHtml('traders')}
   ${IX.tourGates?.[sel] && !traderUnlocked(sel, p) ? `<div class="notice">${icon('lock')}<div><b>${esc(sel)}</b> is still locked. It unlocks in the story chapter <b>Tour</b> at step <b>${esc(IX.tourGates[sel].step)}</b>. Tick that step in the Main Story tab (or any ${esc(sel)} quest) to unlock it here.</div></div>` : ''}
-  <section class="panel trader-panel">
-    <div class="trader-hero">${img(T.img, sel, 'trader-portrait')}
-      <div class="trader-info">
-        <h2>${esc(sel)}</h2>${T.fullName ? `<div class="muted">${esc(T.fullName)}</div>` : ''}
-        ${progressBar(done, qs.length, 'Quests')}
-        ${T.ll?.length ? `<table class="tbl ll-tbl"><thead><tr><th>LL</th><th>PMC level</th><th>Reputation</th>${T.ll.some(r => r.spend) ? '<th>Spent</th>' : ''}<th></th></tr></thead><tbody>
-          <tr class="${ll === 1 ? 'cur' : ''}"><td>1</td><td>–</td><td>–</td>${T.ll.some(r => r.spend) ? '<td>–</td>' : ''}<td><button class="btn btn-s ${ll === 1 ? 'btn-p' : ''}" data-act="setll" data-t="${attr(sel)}" data-l="1">Current</button></td></tr>
-          ${T.ll.map(r => `<tr class="${ll === r.level ? 'cur' : ''}"><td>${r.level}</td><td>${r.pmcLevel ?? '–'}</td><td>${r.rep ?? '–'}</td>${T.ll.some(x => x.spend) ? `<td>${esc(r.spend || '–')}</td>` : ''}<td><button class="btn btn-s ${ll === r.level ? 'btn-p' : ''}" data-act="setll" data-t="${attr(sel)}" data-l="${r.level}">Current</button></td></tr>`).join('')}
-        </tbody></table>
-        <div class="small muted">Your LL: <b>${ll}</b> ${p.settings.ll?.[sel] == null ? '(estimated from your PMC level – click "Current" to set it exactly)' : '(set manually)'} ${p.settings.ll?.[sel] != null ? `<button class="linkbtn" data-act="setll" data-t="${attr(sel)}" data-l="">reset to auto</button>` : ''}</div>` : ''}
-        ${T.notesHtml?.length ? `<details><summary>Notes</summary><ul>${T.notesHtml.map(n => `<li>${n}</li>`).join('')}</ul></details>` : ''}
-      </div>
-    </div>
-  </section>
-  ${filterBar('tf', { trader: false })}
-  ${listHtml(names, 'tLim', { showTrader: false })}`;
+  <div class="tr-bar">
+    <div class="tr-bar-name"><b>${esc(sel)}</b>${T.fullName ? `<span class="muted">${esc(T.fullName)}</span>` : ''}</div>
+    <div class="tr-bar-prog">${progressBar(done, qs.length, 'Tasks')}</div>
+    ${T.ll?.length && sel !== 'Fence' ? `<div class="tr-llsel"><span class="muted">Loyalty</span>${[1, ...T.ll.map(r => r.level)].map(l => { const r = T.ll.find(x => x.level === l); return `<button class="tr-llb ${ll === l ? 'on' : ''}" data-act="setll" data-t="${attr(sel)}" data-l="${l}" data-tip="${attr(l === 1 ? 'LL1' : `LL${l}: PMC level ${r?.pmcLevel ?? '–'}, reputation ${r?.rep ?? '–'}`)}">${ROMAN[l]}</button>`; }).join('')}<span class="small muted">${manual ? `set by you · <button class="linkbtn" data-act="setll" data-t="${attr(sel)}" data-l="">auto</button>` : 'estimated from your level'}</span></div>` : ''}
+    ${T.notesHtml?.length ? `<details class="tr-notes"><summary>Notes</summary><ul>${T.notesHtml.map(n => `<li>${n}</li>`).join('')}</ul></details>` : ''}
+  </div>
+  ${taskScreen({ id: 'tr-' + sel, names: IX.byTrader[sel] || [], group: 'll' })}`;
 }
 
 // ---------------- ALL QUESTS ----------------
@@ -192,11 +183,8 @@ export function renderQuests(root) {
   const all = IX.order.filter(n => visible(D.quests[n], p));
   const done = all.filter(n => isDone(n, p)).length;
   const avail = all.filter(n => questStatus(D.quests[n], p).s === 'available').length;
-  const names = applyFilters(IX.order, 'qf');
   root.innerHTML = `
   <div class="tab-head"><div><h1>All Quests</h1><p class="lede">${all.length} quests for this profile · <b>${avail}</b> available right now at level ${p.settings.level}. <button class="btn btn-s" data-act="active-setup">Set my open quests</button></p></div>
     <div class="head-stat">${progressBar(done, all.length, 'All quests')}</div></div>
-  ${filterBar('qf')}
-  <div class="count-line">${names.length} quests shown</div>
-  ${listHtml(names, 'qLim')}`;
+  ${taskScreen({ id: 'all', names: IX.order, group: 'trader' })}`;
 }
