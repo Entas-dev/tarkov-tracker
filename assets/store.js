@@ -50,6 +50,7 @@ export const store = {
   update(fn, reason = 'progress') { fn(this.p); save(); emit(reason); },
   setUi(k, v) { state.ui[k] = v; save(); },
   on(fn) { listeners.add(fn); return () => listeners.delete(fn); },
+  notify(reason) { emit(reason); },
   exportJson() { return JSON.stringify({ app: 'eft-tracker', exportedAt: new Date().toISOString(), ...state }, null, 1); },
   importJson(txt) {
     const j = JSON.parse(txt);

@@ -2,18 +2,19 @@
 // Built daily by the GitHub Action into data/mapdata-<gameMode>.json, so the site never depends on the live GraphQL API.
 export const JSON_BASE = 'https://json.tarkov.dev';
 
-export async function fetchTarkovJson(gameMode = 'regular', fetchFn = globalThis.fetch) {
+export async function fetchTarkovJson(gameMode = 'regular', fetchFn = globalThis.fetch, { withItems = false } = {}) {
   const get = async (n) => {
     const r = await fetchFn(`${JSON_BASE}/${gameMode}/${n}`);
     if (!r.ok) throw new Error(`json.tarkov.dev ${gameMode}/${n}: HTTP ${r.status}`);
     return r.json();
   };
-  const [tasks, tasksEn, maps, mapsEn] = await Promise.all([get('tasks'), get('tasks_en'), get('maps'), get('maps_en')]);
-  return { tasks, tasksEn, maps, mapsEn, gameMode };
+  const [tasks, tasksEn, maps, mapsEn, items, itemsEn] = await Promise.all([get('tasks'), get('tasks_en'), get('maps'), get('maps_en'),
+    withItems ? get('items') : null, withItems ? get('items_en') : null]);
+  return { tasks, tasksEn, maps, mapsEn, items, itemsEn, gameMode };
 }
 
-export async function buildMapData({ gameMode = 'regular', neededNodes = null, fetchFn = globalThis.fetch } = {}) {
-  return transformMapData({ ...(await fetchTarkovJson(gameMode, fetchFn)), neededNodes });
+export async function buildMapData({ gameMode = 'regular', fetchFn = globalThis.fetch } = {}) {
+  return transformMapData(await fetchTarkovJson(gameMode, fetchFn));
 }
 
 const wikiTitle = (link) => { try { return decodeURIComponent(String(link || '').split('/wiki/')[1] || '').replace(/_/g, ' ').replace(/#.*/, '').trim() || null; } catch { return null; } };
@@ -33,14 +34,15 @@ export function transformGameReqs({ tasks, tasksEn }) {
   return { source: 'json.tarkov.dev', fetchedAt: Date.now(), quests };
 }
 
-export function transformMapData({ tasks, tasksEn, maps, mapsEn, neededNodes = null, gameMode = 'regular' }) {
+// Loose-loot spawn points live in data/loot-<gameMode>.json (builder/loot.js) since v2 of this file.
+export function transformMapData({ tasks, tasksEn, maps, mapsEn, gameMode = 'regular' }) {
   const tr = (k, dict) => (k != null && dict?.data?.[k] != null && dict.data[k] !== '' ? dict.data[k] : k);
   const r2 = (n) => Math.round(n * 100) / 100;
   const P = (p) => (p ? { x: r2(p.x), y: r2(p.y), z: r2(p.z) } : null);
   const mapsArr = Object.values(maps.data.maps || {});
   const mapNorm = Object.fromEntries(mapsArr.map(m => [m.id, m.normalizedName]));
   const qi = tasks.data.questItems || {};
-  const out = { source: 'json.tarkov.dev', gameMode, fetchedAt: Date.now(), tasks: [], maps: [] };
+  const out = { v: 2, source: 'json.tarkov.dev', gameMode, fetchedAt: Date.now(), tasks: [], maps: [] };
   for (const t of Object.values(tasks.data.tasks || {})) {
     let wiki = null;
     if (t.wikiLink) { try { wiki = decodeURIComponent(t.wikiLink.split('/wiki/')[1] || '').replace(/_/g, ' ').replace(/#.*/, '').trim() || null; } catch { wiki = null; } }
@@ -59,7 +61,6 @@ export function transformMapData({ tasks, tasksEn, maps, mapsEn, neededNodes = n
       map: m.normalizedName,
       extracts: (m.extracts || []).filter(e => e.position).map(e => ({ n: tr(e.name, mapsEn), f: e.faction, p: P(e.position) })),
       locks: (m.locks || []).filter(l => l.key && l.position).map(l => ({ k: l.key, p: P(l.position) })),
-      loot: (m.lootLoose || []).map(l => ({ i: (l.items || []).filter(id => !neededNodes || neededNodes.has(id)), p: P(l.position) })).filter(l => l.i.length && l.p),
     });
   }
   return out;

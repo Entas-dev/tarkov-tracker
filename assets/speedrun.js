@@ -4,6 +4,7 @@ import { store } from './store.js';
 import { D, IX, P, visible, questStatus, isDone, mapUnlocked, traderUnlocked } from './model.js';
 import { esc, attr, icon, img, traderImg, qlink, itemChip, fmt, progressBar } from './ui.js';
 import { openPanel } from './components.js';
+import { lootData, ensureLoot, lootState, neededLoot, lootForMap, whereText, itemImg, lootItem, bestMaps, mapDisplayName } from './loot.js';
 
 const RAID_KINDS = new Set(['kill', 'visit', 'mark', 'place', 'extract', 'use']);
 const MENU_KINDS = new Set(['handover', 'talk', 'rep', 'sell', 'build']);
@@ -131,8 +132,23 @@ function scoreMap(entries, sp) {
   return s;
 }
 
-export function planRaids({ maxRaids = 10, expPerRaid = 4000 } = {}) {
+// small tie-breaker: among maps with (almost) the same objectives prefer the one where more of the items you
+// need soon can spawn. Capped below one objective, so loot never outweighs quest progress.
+function lootBonusFn(needs) {
+  if (!needs?.length) return () => 0;
+  const top = needs.filter(n => n.prio >= 2);
+  const cache = {};
+  return (map) => {
+    if (cache[map] != null) return cache[map];
+    let b = 0;
+    for (const x of lootForMap(map, top)) b += (x.prio === 3 ? 0.12 : 0.04) * x.rel;
+    return (cache[map] = Math.min(0.8, b));
+  };
+}
+
+export function planRaids({ maxRaids = 10, expPerRaid = 4000, lootNeeds = null } = {}) {
   const base = P();
+  const lootBonus = lootBonusFn(lootNeeds);
   const sp = cloneProfile(base);
   let exp = expFor(sp.settings.level);
   const raids = [];
@@ -148,7 +164,7 @@ export function planRaids({ maxRaids = 10, expPerRaid = 4000 } = {}) {
       const uniq = []; const seen = new Set();
       for (const e of cand[m]) { const k = e.kind === 'tour' ? 'T' + e.o.id : e.q.name + '|' + e.o.id; if (!seen.has(k)) { seen.add(k); uniq.push(e); } }
       cand[m] = uniq;
-      const sc = scoreMap(uniq, sp);
+      const sc = scoreMap(uniq, sp) + lootBonus(m);
       if (sc > bestScore) { bestScore = sc; best = m; }
     }
     const entries = cand[best];
@@ -186,7 +202,16 @@ export function renderSpeedrun(root) {
   const p = P();
   const ui = store.ui.sr || { n: 10, exp: 4000 };
   const t0 = performance.now();
-  const plan = planRaids({ maxRaids: ui.n, expPerRaid: ui.exp });
+  const ld = lootData();
+  if (!ld && lootState() !== 'missing') ensureLoot();
+  const needs0 = ld ? neededLoot(p) : null;
+  const plan = planRaids({ maxRaids: ui.n, expPerRaid: ui.exp, lootNeeds: needs0 });
+  // quests that the plan works on count as "soon" for item priorities
+  const soon = new Set();
+  for (const r of plan.raids) { for (const e of r.entries) if (e.q) soon.add(e.q.name); r.turnIns.forEach(n => soon.add(n)); (r.lootQuests || []).forEach(n => soon.add(n)); }
+  plan.loot.forEach(a => a.quests.forEach(n => soon.add(n)));
+  const needs = ld ? neededLoot(p, soon) : [];
+  const raidLoot = plan.raids.map(r => (ld ? lootForMap(r.map, needs) : []));
   const ms = Math.round(performance.now() - t0);
   const totalObj = plan.raids.reduce((s, r) => s + r.entries.length, 0);
   const totalQ = plan.raids.reduce((s, r) => s + r.turnIns.length, 0);
@@ -219,6 +244,9 @@ export function renderSpeedrun(root) {
     const byQ = {};
     for (const e of r.entries) if (e.kind === 'quest') (byQ[e.q.name] = byQ[e.q.name] || []).push(e.o);
     const br = bring(r);
+    const lt = raidLoot[i];
+    const ltTop = lt.filter(x => x.prio >= 2).slice(0, 8);
+    const ltRest = lt.filter(x => !ltTop.includes(x));
     return `<li class="raid">
       <div class="raid-h"><span class="raid-n">${i + 1}</span><div class="raid-t"><h2>${esc(r.map)}</h2><div class="small muted">${r.entries.length} objective${r.entries.length > 1 ? 's' : ''} · ${Object.keys(byQ).length} quest${Object.keys(byQ).length !== 1 ? 's' : ''}${tourE.length ? ' + Tour' : ''} · est. level ${r.level}${r.levelAfter > r.level ? ` → ${r.levelAfter}` : ''}</div></div>
         <button class="btn btn-s" data-act="map" data-map="${attr(r.map)}">${icon('map')} Map</button></div>
@@ -228,12 +256,49 @@ export function renderSpeedrun(root) {
         ${Object.entries(byQ).map(([n, objs]) => `<div class="raid-q"><div class="raid-qh">${traderImg(D.quests[n].trader, 'mp-tr')} ${qlink(n)} ${r.turnIns.includes(n) ? '<span class="badge b-av" data-tip="All raid objectives done after this raid – hand it in">finishes</span>' : ''}<button class="ibtn" data-act="info" data-q="${attr(n)}" aria-label="Info">${icon('info')}</button></div>
           <ul class="objs">${objs.map(o => `<li class="obj"><button class="cb cb-s ${p.obj[n + '|' + o.id] ? 'on' : ''}" data-act="obj" data-q="${attr(n)}" data-o="${o.id}" aria-label="Toggle">${icon('check')}</button><span class="obj-t">${o.html}${o.kind === 'kill' && /\b([5-9]|\d{2,})\b/.test(o.text) ? ' <span class="small muted">(may need more than one raid)</span>' : ''}</span></li>`).join('')}</ul></div>`).join('')}
       </div>
+      ${lt.length ? `<div class="raid-loot"><div class="raid-lh">${icon('box')} <span class="small"><b>Grab on ${esc(r.map)}</b> – items you still need for quests / hideout that spawn here</span></div>
+        ${ltTop.length ? `<div class="chips">${ltTop.map(x => lootChip(x, r.map)).join('')}</div>` : ''}
+        ${ltRest.length ? `<details class="raid-more"><summary class="small">${ltTop.length ? 'More' : 'Items for later'} (${ltRest.length})</summary><div class="chips">${ltRest.slice(0, 60).map(x => lootChip(x, r.map)).join('')}</div></details>` : ''}</div>` : ''}
       ${r.turnIns.length || r.tourAfter.length || r.lootQuests?.length ? `<div class="raid-after"><span class="small muted">After the raid:</span> ${r.tourAfter.length ? `<span class="small">Tour: ${r.tourAfter.map(o => o.text).map(esc).join(' → ')}</span>` : ''} ${r.turnIns.length ? `<span class="small">hand in ${r.turnIns.map(n => qlink(n)).join(', ')}</span>` : ''}${r.lootQuests?.length ? ` <span class="small">· unlocked item quests: ${r.lootQuests.map(n => qlink(n)).join(', ')}</span>` : ''}</div>` : ''}
     </li>`;
   }).join('') || '<div class="empty">Nothing to plan – every available quest objective is done, or the next quests need a higher level / trader loyalty.</div>'}</ol>
-  ${plan.loot.length ? `<section class="panel"><div class="panel-h"><h2>Loot to keep while raiding</h2><span class="small muted">Items your current/next quests need (no fixed map)</span></div>
-    <div class="chips cgrid">${plan.loot.slice(0, 40).map(a => `<span class="chip" data-tip-item="${attr(a.item)}">${img(D.items[a.item]?.img, a.item, 'chip-img')}<span class="chip-name" data-item="${attr(a.item)}">${esc(a.item)}</span><span class="ic-count">${fmt(a.count)}</span>${a.fir ? '<span class="fir">FiR</span>' : ''}</span>`).join('')}</div></section>` : ''}
-  <p class="small muted">How it's planned: from your ticked progress the planner simulates raid by raid. Each raid picks the map where you can do the most objectives, preferring Tour steps (they unlock traders and maps) and objectives that finish a quest. After each raid it hands in finished quests and estimates your level from quest EXP plus the EXP-per-raid setting. Objectives that allow several maps are assigned to one of them. Computed in ${ms} ms.</p>`;
+  ${lootPlanHtml(plan, needs, raidLoot, ld)}
+  <p class="small muted">How it's planned: from your ticked progress the planner simulates raid by raid. Each raid picks the map where you can do the most objectives, preferring Tour steps (they unlock traders and maps) and objectives that finish a quest. After each raid it hands in finished quests and estimates your level from quest EXP plus the EXP-per-raid setting. Objectives that allow several maps are assigned to one of them. When two maps are about equal, the one where more of your needed items can spawn wins. Item spawns: loose-loot spots and container positions from tarkov.dev, container contents from the wiki loot tables – spawns are random, so this tells you where your odds are best, not where an item is guaranteed. Computed in ${ms} ms.</p>`;
+}
+
+// ---------- loot ----------
+function srcText(x) {
+  return x.sources.slice(0, 5).map(s => `${s.type === 'hideout' ? `${s.name} L${s.level}` : s.name} ×${s.count - (s.have || 0)}${s.soon ? '' : ' (later)'}`).join(', ') + (x.sources.length > 5 ? ` +${x.sources.length - 5} more` : '');
+}
+function lootChip(x, map) {
+  const it = lootItem(x.li);
+  const I = D.items[x.item] || {};
+  const tip = `${whereText(x.f)}${x.best ? ' · best map for this item' : ''} — for ${srcText(x)}`;
+  return `<span class="chip chip-s lchip lp${x.prio}" data-tip="${attr(tip)}">${img(I.img || itemImg(it), x.item, 'chip-img')}<span class="chip-name" data-item="${attr(x.item)}">${esc(x.item)}</span><span class="ic-count">${fmt(x.missing)}</span>${x.fir ? '<span class="fir">FiR</span>' : ''}${x.best ? `<span class="lbest" aria-label="best map">${icon('star')}</span>` : ''}<button class="ibtn ibtn-s" data-act="loot-show" data-item="${attr(x.item)}" data-map="${attr(map)}" aria-label="Show spawns on the map">${icon('map')}</button></span>`;
+}
+function lootPlanHtml(plan, needs, raidLoot, ld) {
+  if (!ld) {
+    const st = lootState();
+    return plan.loot.length ? `<section class="panel"><div class="panel-h"><h2>Loot to keep while raiding</h2><span class="small muted">${st === 'missing' ? 'Spawn data not available yet' : 'Loading spawn data…'}</span></div>
+    <div class="chips cgrid">${plan.loot.slice(0, 40).map(a => itemChip(a.item, { count: a.count, fir: a.fir, small: true })).join('')}</div></section>` : '';
+  }
+  const inRaids = new Map();
+  raidLoot.forEach((lt, i) => { for (const x of lt) { const a = inRaids.get(x.item) || []; a.push(i); inRaids.set(x.item, a); } });
+  const top = needs.filter(n => n.prio >= 2).sort((a, b) => b.prio - a.prio || b.missing - a.missing);
+  const noSpawn = plan.loot.filter(a => !needs.some(n => n.item === a.item && bestMaps(n.li).length));
+  const lim = store.ui.srLootLim || 30;
+  return `<section class="panel"><div class="panel-h"><h2>Loot plan</h2><span class="small muted">Items your open quests, the story and your next hideout levels still need – where they spawn best and in which of the planned raids you can grab them</span></div>
+    <div class="lplan">${top.slice(0, lim).map(n => {
+      const it = lootItem(n.li); const I = D.items[n.item] || {};
+      const bm = bestMaps(n.li).slice(0, 3);
+      const rs = inRaids.get(n.item) || [];
+      return `<div class="lp-row lp${n.prio}">${img(I.img || itemImg(it), n.item, 'i-ic')}
+        <div class="lp-main"><div><span class="chip-name" data-item="${attr(n.item)}" data-tip-item="${attr(n.item)}">${esc(n.item)}</span> <b>×${fmt(n.missing)}</b>${n.fir ? ' <span class="fir">FiR</span>' : ''} <span class="small muted">for ${esc(srcText(n))}</span></div>
+          <div class="small">${bm.length ? `Best: ${bm.map(b => `<button class="linkbtn" data-act="loot-show" data-item="${attr(n.item)}" data-map="${attr(mapDisplayName(b.key))}" data-tip="${attr(whereText(b))}">${esc(mapDisplayName(b.key))}</button>`).join(', ')}` : '<span class="muted">No spawn data – barter, craft or flea</span>'}${rs.length ? ` · <span class="muted">in your plan:</span> ${rs.slice(0, 4).map(i => `raid ${i + 1} (${esc(plan.raids[i].map)})`).join(', ')}${rs.length > 4 ? ' …' : ''}` : ''}</div></div></div>`;
+    }).join('') || '<div class="empty small">No quest or next-level hideout items missing.</div>'}</div>
+    ${top.length > lim ? `<button class="btn more" data-act="more" data-k="srLootLim">Show more (${top.length - lim} hidden)</button>` : ''}
+    ${noSpawn.length ? `<div class="sub-h">Quest items without spawn data</div><div class="chips">${noSpawn.slice(0, 30).map(a => itemChip(a.item, { count: a.count, fir: a.fir, small: true })).join('')}</div>` : ''}
+  </section>`;
 }
 
 // ---------- "my open quests" setup ----------

@@ -7,7 +7,7 @@ import { renderStory, renderKappa, renderTraders, renderQuests } from './tabs-qu
 import { renderHideout, renderPrestige, renderBattlepass, renderAchievements, renderItems } from './tabs-other.js';
 import { loadDataset, buildLive, isStale, ageText, loadGameReqs } from './data.js';
 let gameReqs = null;
-import { initMapPanel, openMap } from './mappanel.js';
+import { initMapPanel, openMap, openMapLoot } from './mappanel.js';
 import { perksBannerHtml, openPerks, togglePerk } from './perks.js';
 import { renderSpeedrun, openActiveSetup } from './speedrun.js';
 
@@ -324,6 +324,7 @@ function onClick(e) {
     case 'undo': if (undoSnap) { const s = JSON.parse(undoSnap); undoSnap = null; store.update(pp => { pp.quests = s.quests; pp.active = s.active || {}; pp.obj = s.obj; pp.ch = s.ch; pp.chObj = s.chObj; pp.settings.choices = s.choices; }); toast('Undone'); } break;
     case 'perks': (lastDrawer = openPerks)(); break;
     case 'map': openMap(b.dataset.map, b.dataset.focus || null); break;
+    case 'loot-show': hideTip(); openMapLoot(b.dataset.map, b.dataset.item); break;
     case 'cnt': {
       const k = b.dataset.k, d = +b.dataset.d, max = +b.dataset.max || Infinity;
       store.update(pp => {

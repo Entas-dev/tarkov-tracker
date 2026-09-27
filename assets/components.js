@@ -1,6 +1,7 @@
 // Quest cards, objective lists, info drawer
 import { D, IX, P, visible, condStatus, traderUnlocked, questMapsUnlocked, questStatus, isDone, questNeeds, questObjProgress, objDone, cntKey, isSeasonal, preOf, traderLL } from './model.js';
 import { esc, attr, icon, img, traderImg, qlink, itemChip, statusBadge, wikiHref, wikiSectionHtml, fmt, progressBar } from './ui.js';
+import { lootData, lootState, ensureLoot, itemIndex, lootItem, itemImg, bestMaps, whereText, itemContainers, mapDisplayName } from './loot.js';
 
 export const expanded = new Set();
 
@@ -152,12 +153,38 @@ export function openChapterInfo(name) {
   fillLive(el, c.name, /^guide$/i);
 }
 
+// spawn info from the loot index (tarkov.dev positions + wiki container loot tables)
+function spawnHtml(name) {
+  const ld = lootData();
+  if (!ld) { if (lootState() !== 'missing') ensureLoot(); return lootState() === 'missing' ? '' : '<div class="sub-h">Spawns on maps</div><div class="loading small">Loading spawn data…</div>'; }
+  const i = itemIndex(name);
+  if (i < 0) return '<div class="sub-h">Spawns on maps</div><p class="small muted">No known loose or container spawn – usually trader, barter, craft or boss loot.</p>';
+  const bm = bestMaps(i);
+  const cs = itemContainers(i);
+  return `<div class="sub-h">Spawns on maps <span class="muted">(best odds first)</span></div>
+    ${bm.length ? `<table class="sp-t"><tbody>${bm.slice(0, 10).map(b => `<tr><td><b>${esc(mapDisplayName(b.key))}</b></td><td class="small">${esc(whereText(b))}</td><td><button class="btn btn-s" data-act="loot-show" data-item="${attr(name)}" data-map="${attr(mapDisplayName(b.key))}">${icon('map')} Show</button></td></tr>`).join('')}</tbody></table>` : '<p class="small muted">No spawn positions known.</p>'}
+    ${cs.length ? `<p class="small"><span class="muted">Can be in:</span> ${cs.map(c => `<a class="wl" data-t="${attr(c.wiki || c.name)}">${esc(c.name)}</a>`).join(', ')}</p>` : ''}
+    <p class="small muted">Loose spots &amp; container positions: tarkov.dev · container contents: wiki loot tables. Spawns are random.</p>`;
+}
+
 export function openItemInfo(item) {
   const I = D.items[item];
-  if (!I) return openWikiPage(item);
+  if (!I) {
+    const li = itemIndex(item);
+    if (li < 0) return openWikiPage(item);
+    const x = lootItem(li);
+    const html = `<div class="item-hero">${img(itemImg(x), x.n, 'item-big')}<div><div class="muted">${esc(x.cat)}</div>${x.p ? `<div class="muted small">≈ ${fmt(x.p)} ₽</div>` : ''}<a class="btn" href="${wikiHref(x.n)}" target="_blank" rel="noopener">${icon('ext')} Wiki</a></div></div>
+      <p class="small muted">Not needed for any quest, story chapter or hideout level.</p>
+      ${spawnHtml(x.n)}
+      <div class="sub-h">Where to find <span class="muted">(live from wiki)</span></div><div class="live"><div class="loading">Loading…</div></div>`;
+    const el = openDrawer(`${img(itemImg(x), '', 'dr-ic')}<span>${esc(x.n)}</span>`, html);
+    fillLive(el, x.n, /locat|spawn|where|found|obtain|how to get/i, 'The wiki page has no location section.');
+    return;
+  }
   const uses = IX.itemUse[item] || [];
   const html = `<div class="item-hero">${img(I.img, I.name, 'item-big')}<div><div class="muted">${esc(I.type || '')}</div>${I.node ? `<div class="muted small">ID ${esc(I.node)}</div>` : ''}<a class="btn" href="${wikiHref(I.name)}" target="_blank" rel="noopener">${icon('ext')} Wiki</a></div></div>
     ${uses.length ? `<div class="sub-h">Needed for</div><ul class="plain">${uses.map(u => `<li>${u.type === 'hideout' ? `<a class="wl" data-module="${attr(u.name)}">${esc(u.name)} L${u.level}</a>` : u.type === 'chapter' ? `<a class="wl" data-t="${attr(u.name)}">${esc(u.name)}</a> <span class="muted">(story)</span>` : qlink(u.name)} · ${fmt(u.count)}${u.fir ? ' <span class="fir">FiR</span>' : ''}${u.optional ? ' <span class="muted">(optional)</span>' : ''}</li>`).join('')}</ul>` : ''}
+    ${I.currency ? '' : spawnHtml(I.name)}
     <div class="sub-h">Where to find <span class="muted">(live from wiki)</span></div><div class="live"><div class="loading">Loading…</div></div>`;
   const el = openDrawer(`${img(I.img, '', 'dr-ic')}<span>${esc(I.name)}</span>`, html);
   fillLive(el, I.name, /locat|spawn|where|found|obtain|how to get/i, 'The wiki page has no location section. Check the wiki page for barters, crafts and trader offers.');
