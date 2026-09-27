@@ -386,6 +386,10 @@ export function parseTrader(title, wt) {
   }
   const notes = section(wt, 'Notes') || '';
   t.notesHtml = bulletTree(notes).filter(n => !n.text).map(n => inlineHtml(n.raw));
+  // "To get access to Jaeger you need to complete the quest [[Introduction]]" / "unlocked through [[Skier]]'s quest [[Easy Money - Part 1]]"
+  let um = wt.match(/need to (complete|accept) the quest \[\[([^\]|]+)/i);
+  if (um) t.unlockQuest = { q: normTitle(um[2]), type: um[1].toLowerCase() === 'accept' ? 'accept' : 'complete' };
+  else if ((um = wt.match(/unlocked through \[\[[^\]]+\]\]'s quest \[\[([^\]|]+)/i))) t.unlockQuest = { q: normTitle(um[1]), type: 'complete' };
   return t;
 }
 

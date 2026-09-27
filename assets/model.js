@@ -41,6 +41,12 @@ function buildIndexes() {
       q.pre.push([{ q: r.q, type, fromGame: true }]);
     }
   }
+  // traders unlocked by a quest (Jaeger ← Introduction, Ref ← Easy Money - Part 1, BTR Driver ← accept A Helping Hand)
+  for (const [tn, T] of Object.entries(D.traders || {})) {
+    const u = T.unlockQuest;
+    if (!u || !Q[u.q]) continue;
+    for (const q of Object.values(Q)) if (q.trader === tn && q.name !== u.q && !q.pre.some(g => g.some(a => a.q === u.q))) q.pre.push([{ q: u.q, type: u.type, fromTrader: true }]);
+  }
   // Collector (Kappa) requires every quest the wiki marks as "required for Kappa"
   if (Q['Collector']) {
     const C = Q['Collector'];
@@ -113,7 +119,8 @@ function buildIndexes() {
   for (const q of Object.values(Q)) for (const g of q.pre) for (const a of g) { if (out[a.q]) { out[a.q].push(q.name); indeg[q.name]++; } }
   const effLevel = (q) => Math.max(q.minLevel || 0, (q.ll && D.traders[q.ll.trader]?.ll?.find(l => l.level === q.ll.level)?.pmcLevel) || 0);
   IX.effLevel = (n) => effLevel(Q[n]);
-  const key = (n) => { const q = Q[n]; const ti = tOrder.indexOf(q.trader); const g = gateIdx(q); return [Math.max(effLevel(q), g >= 0 ? 1 + g / 3 : 0), g, effLevel(q), ti < 0 ? 99 : ti, n]; };
+  const karmaLvl = (q) => (q.trader === 'Fence' && !effLevel(q) ? 10 : 0); // Fence quests depend on Scav karma, not on level
+  const key = (n) => { const q = Q[n]; const ti = tOrder.indexOf(q.trader); const g = gateIdx(q); return [Math.max(effLevel(q), g >= 0 ? 1 + g / 3 : 0, karmaLvl(q)), g, effLevel(q), ti < 0 ? 99 : ti, n]; };
   const cmp = (a, b) => { const A = key(a), B = key(b); for (let i = 0; i < A.length; i++) { if (A[i] < B[i]) return -1; if (A[i] > B[i]) return 1; } return 0; };
   let ready = Object.keys(indeg).filter(n => indeg[n] === 0).sort(cmp);
   const order = [];
