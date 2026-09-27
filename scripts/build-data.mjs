@@ -29,9 +29,9 @@ for (const gm of ['regular', 'pve']) {
     fs.writeFileSync(new URL(`mapdata-${gm}.json`, out), JSON.stringify(md));
     console.log(`mapdata-${gm}.json: ${md.tasks.length} tasks with positions, ${md.maps.length} maps, ${kb(`mapdata-${gm}.json`)}`);
     if (gm === 'regular') {
-      const gr = transformGameReqs(raw);
+      const gr = transformGameReqs({ ...raw, wikiQuests: ds.quests, log: console.log });
       fs.writeFileSync(new URL('prereq-game.json', out), JSON.stringify(gr));
-      console.log(`prereq-game.json: ${Object.keys(gr.quests).length} quests`);
+      console.log(`prereq-game.json: ${Object.keys(gr.quests).length} quests, ${Object.keys(gr.vars).length} loyalty-group counters, ${Object.values(gr.quests).filter(q => q.vars).length} quests gated by them`);
     }
     // per-map loot (loose spawns + containers with their wiki loot tables)
     const loot = transformLoot({ ...raw, wikiContainers, gameMode: gm });

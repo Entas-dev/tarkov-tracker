@@ -30,10 +30,23 @@ function buildIndexes() {
   for (const [b, alts] of Object.entries(rev)) Q[b].pre.push(alts);
   // prerequisites from the game files (tarkov.dev export) fill links missing on the wiki pages
   const G = D.gameReqs?.quests || {};
+  const V = D.gameReqs?.vars || {};
+  const v2 = (D.gameReqs?.v || 1) >= 2;
+  IX.vars = {};
+  for (const [id, v] of Object.entries(V)) IX.vars[id] = { id, ...v, quests: [] };
   for (const q of Object.values(Q)) {
     const g = G[q.name];
+    q.vars = [];
     if (!g) continue;
-    if (!q.minLevel && g.lvl) q.minLevel = g.lvl;
+    if (v2) {
+      // since patch 1.1 the game files are the reliable source for level / loyalty requirements –
+      // many wiki pages still show the old ones (e.g. "level 30" for Small Things, Big Help)
+      if (q.minLevelWiki === undefined) q.minLevelWiki = q.minLevel ?? null;
+      q.minLevel = g.lvl || null;
+      for (const [id, min] of g.vars || []) { const info = IX.vars[id]; if (!info) continue; q.vars.push({ v: id, min, trader: info.trader, tier: info.tier, group: info.groups.indexOf(min) }); info.quests.push(q.name); }
+      if (q.vars.length) { if (q.llWiki === undefined) q.llWiki = q.ll || null; q.ll = { trader: q.vars[0].trader, level: q.vars[0].tier, fromGame: true }; }
+      else if (g.ll?.length) { if (q.llWiki === undefined) q.llWiki = q.ll || null; q.ll = { trader: g.ll[0][0], level: g.ll[0][1], fromGame: true }; }
+    } else if (!q.minLevel && g.lvl) q.minLevel = g.lvl;
     for (const r of g.req || []) {
       if (!Q[r.q] || r.q === q.name || q.pre.some(gr => gr.some(a => a.q === r.q))) continue;
       const st = r.st || [];
@@ -68,7 +81,7 @@ function buildIndexes() {
   const groups = {};
   for (const q of Object.values(Q)) {
     const i = q.name.lastIndexOf(' - ');
-    if (i < 0 || q.alts?.length || q.event || q.mode) continue;
+    if (i < 0 || q.alts?.length || q.event || q.mode || q.vars?.length) continue; // loyalty-group quests are no chain any more
     let base = q.name.slice(0, i);
     const pm = q.name.match(/^(.*) - Part (\d+)$/i);
     if (pm) base = pm[1];
@@ -122,7 +135,8 @@ function buildIndexes() {
   const effLevel = (q) => Math.max(q.minLevel || 0, (q.ll && D.traders[q.ll.trader]?.ll?.find(l => l.level === q.ll.level)?.pmcLevel) || 0);
   IX.effLevel = (n) => effLevel(Q[n]);
   const karmaLvl = (q) => (q.trader === 'Fence' && !effLevel(q) ? 10 : 0); // Fence quests depend on Scav karma, not on level
-  const key = (n) => { const q = Q[n]; const ti = tOrder.indexOf(q.trader); const g = gateIdx(q); return [Math.max(effLevel(q), g >= 0 ? 1 + g / 3 : 0, karmaLvl(q)), g, effLevel(q), ti < 0 ? 99 : ti, n]; };
+  const vgrp = (q) => (q.vars?.length ? q.vars[0].tier * 10 + q.vars[0].group : 0);
+  const key = (n) => { const q = Q[n]; const ti = tOrder.indexOf(q.trader); const g = gateIdx(q); return [Math.max(effLevel(q), g >= 0 ? 1 + g / 3 : 0, karmaLvl(q)), g, effLevel(q), vgrp(q), ti < 0 ? 99 : ti, n]; };
   const cmp = (a, b) => { const A = key(a), B = key(b); for (let i = 0; i < A.length; i++) { if (A[i] < B[i]) return -1; if (A[i] > B[i]) return 1; } return 0; };
   let ready = Object.keys(indeg).filter(n => indeg[n] === 0).sort(cmp);
   const order = [];
@@ -190,6 +204,7 @@ export function visible(q, p = P()) {
   if (!q) return false;
   if (q.mode === 'seasonal' && store.active !== 'seasonal') return false;
   if (q.mode === 'pve' && store.active !== 'pve') return false;
+  if (store.active === 'seasonal' && q.seasonal?.some(s => /cannot be obtained|not available/i.test(s.text || ''))) return false;
   if (q.faction && p.settings.faction && q.faction !== p.settings.faction) return false;
   if (q.edition === 'EOD' && !p.settings.eod) return false;
   if (q.edition === 'Unheard' && !p.settings.unheard) return false;
@@ -207,6 +222,27 @@ export function traderLL(trader, p = P()) {
   for (const r of t.ll) if ((r.pmcLevel || 0) <= p.settings.level) ll = Math.max(ll, r.level);
   return ll;
 }
+
+// Loyalty-group counter (patch 1.1): side tasks of a trader LL unlock in groups. The game raises a hidden counter
+// per trader LL; we estimate it from what you did: the first group opens when you reach the LL, every finished
+// task of that LL counts one up, reaching the next LL opens the next group – and quests you have open or finished
+// prove the counter reached their threshold.
+export function varValue(id, p = P()) {
+  const info = IX.vars?.[id];
+  if (!info) return Infinity;
+  let ev = 0, done = 0;
+  for (const n of info.quests) {
+    const x = D.quests[n].vars.find(v => v.v === id);
+    if (isDone(n, p)) { done++; ev = Math.max(ev, x.min); } else if (p.active?.[n]) ev = Math.max(ev, x.min);
+  }
+  const ll = traderLL(info.trader, p);
+  if (ll < info.tier) return ev;
+  const gs = info.groups;
+  let est = gs[0] + done;
+  if (ll > info.tier) { const idx = gs.filter(t => t <= est).length - 1; est = Math.max(est, gs[Math.min(gs.length - 1, Math.max(0, idx) + (ll - info.tier))]); }
+  return Math.max(ev, est);
+}
+export function varNeed(x, p = P()) { return Math.max(0, x.min - varValue(x.v, p)); }
 
 export function groupSatisfied(g, p = P()) {
   return g.some(a => {
@@ -228,6 +264,7 @@ export function questStatus(q, p = P()) {
   for (const g of preOf(q)) if (!groupSatisfied(g, p)) reasons.push({ k: 'pre', g });
   if (q.minLevel && p.settings.level < q.minLevel) reasons.push({ k: 'level', v: q.minLevel });
   if (q.ll && q.ll.trader && traderLL(q.ll.trader, p) < q.ll.level) reasons.push({ k: 'll', v: q.ll });
+  for (const x of q.vars || []) if (varValue(x.v, p) < x.min) reasons.push({ k: 'var', x });
   if (!startDone(p)) reasons.push({ k: 'start', step: IX.startGate.step });
   else if (!traderUnlocked(q.trader, p)) reasons.push({ k: 'tour', trader: q.trader, step: IX.tourGates[q.trader].step });
   if (!questMapsUnlocked(q, p)) reasons.push({ k: 'map', maps: q.maps });
@@ -308,17 +345,24 @@ export function applyActiveQuests(mode = 'merge') {
     // an open quest proves you reached its level requirement
     const minLv = Math.max(0, ...act.map(n => D.quests[n].minLevel || 0));
     if (minLv > (p.settings.level || 1)) { p.settings.level = minLv; info.level = minLv; }
+    // …and the trader loyalty level it needs
+    info.ll = [];
+    for (const n of act) { const L = D.quests[n].ll; if (L?.trader && traderLL(L.trader, p) < L.level) { p.settings.ll = { ...(p.settings.ll || {}), [L.trader]: L.level }; info.ll.push(`${L.trader} LL${L.level}`); } }
     const all = new Set();
     for (const n of act) for (const m of prerequisiteClosure(n, p)) if (!p.active[m]) all.add(m);
     for (const m of all) p.quests[m] = 1;
     for (const id of tourStepsFor([...act, ...all], p)) p.chObj[`Tour|${id}`] = 1;
     if (mode === 'strict') {
       const traders = new Set(act.map(n => D.quests[n].trader));
+      // loyalty groups you have open quests in: groups above the highest open one are locked, not finished
+      const cap = {};
+      for (const n of act) for (const x of D.quests[n].vars || []) cap[x.v] = Math.max(cap[x.v] || 0, x.min);
       for (let pass = 0; pass < 30; pass++) {
         let changed = 0;
         for (const n of IX.order) {
           const q = D.quests[n];
           if (p.quests[n] || p.active[n] || !traders.has(q.trader) || !visible(q, p)) continue;
+          if ((q.vars || []).some(x => cap[x.v] != null && x.min > cap[x.v])) continue;
           if (questStatus(q, p).s !== 'available') continue;
           p.quests[n] = 1; changed++; info.strict++;
         }
