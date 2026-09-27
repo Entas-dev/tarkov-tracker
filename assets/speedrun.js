@@ -159,9 +159,10 @@ export function planRaids({ maxRaids = 10, expPerRaid = 4000 } = {}) {
     }
     const log = { tour: [], done: [], loot: [] };
     autoAdvance(sp, log);
-    const gained = [...log.done, ...log.loot].reduce((s, n) => s + (D.quests[n].exp || 0), 0) + expPerRaid;
-    exp += gained;
-    sp.settings.level = Math.max(sp.settings.level, levelFor(exp));
+    // EXP only for quests actually finished through raid objectives – item/menu-only quests are assumed but not credited
+    const hasRaidObj = (n) => { const q = D.quests[n]; return q.objectives.some(o => !o.optional && objType(q, o) === 'raid'); };
+    const gained = log.done.filter(hasRaidObj).reduce((s, n) => s + (D.quests[n].exp || 0), 0) + expPerRaid;
+    if (expPerRaid > 0) { exp += gained; sp.settings.level = Math.max(sp.settings.level, levelFor(exp)); }
     raids.push({ map: best, entries, turnIns: log.done, lootQuests: log.loot, tourAfter: log.tour, level: levelBefore, levelAfter: sp.settings.level, score: bestScore });
   }
   // loot to collect for quests that are (or become) available in the plan
@@ -205,8 +206,8 @@ export function renderSpeedrun(root) {
   <div class="filters">
     <span class="small muted">Plan</span>
     <div class="seg" role="radiogroup" aria-label="Number of raids">${[5, 10, 20, 40].map(n => `<button role="radio" aria-checked="${ui.n === n}" class="seg-b ${ui.n === n ? 'on' : ''}" data-act="sr" data-k="n" data-v="${n}">${n} raids</button>`).join('')}</div>
-    <span class="small muted" data-tip="EXP you earn per raid besides quest rewards (kills, looting, survival). Used to estimate when level-gated quests unlock.">EXP per raid</span>
-    <div class="seg" role="radiogroup" aria-label="EXP per raid">${[[1500, 'low'], [4000, 'normal'], [8000, 'high']].map(([v, l]) => `<button role="radio" aria-checked="${ui.exp === v}" class="seg-b ${ui.exp === v ? 'on' : ''}" data-act="sr" data-k="exp" data-v="${v}">${l}</button>`).join('')}</div>
+    <span class="small muted" data-tip="EXP you earn per raid besides quest rewards (kills, looting, survival). Used to estimate when level-gated quests unlock. 'off' keeps your current level for the whole plan.">Level-ups</span>
+    <div class="seg" role="radiogroup" aria-label="EXP per raid">${[[0, 'off'], [1500, 'low'], [4000, 'normal'], [8000, 'high']].map(([v, l]) => `<button role="radio" aria-checked="${ui.exp === v}" class="seg-b ${ui.exp === v ? 'on' : ''}" data-act="sr" data-k="exp" data-v="${v}">${l}</button>`).join('')}</div>
   </div>
   ${plan.prelude.tour.length || plan.prelude.done.length || plan.prelude.loot.length ? `<section class="panel sr-pre"><div class="panel-h"><h2>Right now, before your next raid</h2></div>
     ${plan.prelude.tour.length ? `<div class="sub-h">Tour steps at the traders</div><ul class="plain">${plan.prelude.tour.map(o => `<li>${o.html}</li>`).join('')}</ul>` : ''}
