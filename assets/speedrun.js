@@ -381,7 +381,7 @@ export function openActiveSetup() {
   }).join('');
   openPanel(`${icon('list', 'dr-ic')}<span>My open quests</span>`, `
     <ol class="as-steps small">
-      <li>In the game open every trader's <b>Tasks</b> with <b>Show completed</b> turned off, and set your <b>PMC level</b>: <input type="number" min="1" max="79" value="${p.settings.level}" data-set="level" class="as-lvl" aria-label="PMC level">${minLv > p.settings.level ? ` <span class="c-orange">your open quests need at least level ${minLv}</span>` : ''}</li>
+      <li>In the game open every trader's <b>Tasks</b> with <b>Show completed</b> and <b>Show locked</b> turned off, and set your <b>PMC level</b>: <input type="number" min="1" max="79" value="${p.settings.level}" data-set="level" class="as-lvl" aria-label="PMC level">${minLv > p.settings.level ? ` <span class="c-orange">your open quests need at least level ${minLv}</span>` : ''}</li>
       <li>Tick <b>every</b> quest you see there. Also set the <b>loyalty level (LL)</b> you have with each of those traders – quests above your LL then count as "not unlocked yet" instead of finished.</li>
       <li>Press <b>Apply – this is my full task list</b>.</li>
     </ol>
