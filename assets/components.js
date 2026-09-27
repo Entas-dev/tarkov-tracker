@@ -1,5 +1,5 @@
 // Quest cards, objective lists, info drawer
-import { D, IX, P, visible, condStatus, questStatus, isDone, questNeeds, questObjProgress, objDone, cntKey, isSeasonal, preOf, traderLL } from './model.js';
+import { D, IX, P, visible, condStatus, traderUnlocked, questStatus, isDone, questNeeds, questObjProgress, objDone, cntKey, isSeasonal, preOf, traderLL } from './model.js';
 import { esc, attr, icon, img, traderImg, qlink, itemChip, statusBadge, wikiHref, wikiSectionHtml, fmt, progressBar } from './ui.js';
 
 export const expanded = new Set();
@@ -115,6 +115,7 @@ export function openQuestInfo(name) {
   const p = P();
   const st = questStatus(q, p);
   const reqs = [];
+  if (IX.tourGates?.[q.trader]) reqs.push(`${esc(q.trader)} unlocked through Tour step <b>${esc(IX.tourGates[q.trader].step)}</b> ${traderUnlocked(q.trader, p) ? '<span class="t-ok">✓</span>' : '<span class="muted">(not yet)</span>'}`);
   if (q.minLevel) reqs.push(`PMC level ${q.minLevel}`);
   if (q.ll) reqs.push(`${esc(q.ll.trader)} loyalty level ${q.ll.level} <span class="muted">(yours: ${traderLL(q.ll.trader, p)})</span>`);
   const kapG = preOf(q).filter(g => g.every(a => a.kappa));

@@ -304,6 +304,30 @@ export function parseStoryChapter(title, wt) {
     }
   }
   ch.hasGuide = /==\s*Guide\s*==/i.test(wt);
+  // Trader unlocks inside the chapter (Tour): guide steps like "[[Ragman]] - [[Interchange]]" with "Unlocks [[Skier]] as trader"
+  ch.traderUnlocks = [];
+  const guide = secs.find(s => s.level === 2 && s.titleText.toLowerCase() === 'guide');
+  if (guide) {
+    let from = 0;
+    for (const s of secs.filter(x => x.level === 3 && x.start > guide.start && x.start < guide.start + guide.body.length + 10)) {
+      const um = [...s.body.matchAll(/Unlocks\s+\[\[([^\]|]+)(?:\|[^\]]*)?\]\]\s+as\s+(?:a\s+)?trader/gi)].map(m => normTitle(m[1]));
+      const hl = links(s.title).map(l => l.target);
+      if (!um.length || !hl.length) continue;
+      const words = hl.map(h => h.toLowerCase());
+      const top = ch.objectives.map((o, i) => ({ o, i })).filter(x => (x.o.depth || 1) === 1 && x.i >= from);
+      const startI = top.findIndex(x => /^talk to /i.test(x.o.text) && x.o.text.toLowerCase().includes(words[0]));
+      if (startI < 0) continue;
+      let endI = startI;
+      for (let k = startI + 1; k < top.length; k++) {
+        const t = top[k].o.text.toLowerCase();
+        if (/^talk to /i.test(t) || !words.some(w => t.includes(w))) break;
+        endI = k;
+      }
+      const unlockObj = top[endI].o.id;
+      from = top[endI].i + 1;
+      for (const tr of um) ch.traderUnlocks.push({ trader: tr, oid: unlockObj, step: plain(s.title) });
+    }
+  }
   return ch;
 }
 

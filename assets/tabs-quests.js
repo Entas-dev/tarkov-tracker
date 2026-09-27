@@ -1,6 +1,6 @@
 // Story, Kappa, Traders, All quests tabs
 import { store } from './store.js';
-import { D, IX, P, ENDINGS, condStatus, visible, questStatus, isDone, chDone, chapterProgress, chapterClosure, traderLL, questNeeds, isSeasonal } from './model.js';
+import { D, IX, P, ENDINGS, condStatus, traderUnlocked, visible, questStatus, isDone, chDone, chapterProgress, chapterClosure, traderLL, questNeeds, isSeasonal } from './model.js';
 import { esc, attr, icon, img, traderImg, qlink, itemChip, progressBar, fmt, statusBadge } from './ui.js';
 import { questCard, objectiveRows, needsBlock, mapChips, expanded } from './components.js';
 import { perksNotesHtml } from './perks.js';
@@ -167,6 +167,7 @@ export function renderTraders(root) {
     ${list.map(t => { const all = (IX.byTrader[t] || []).filter(n => visible(D.quests[n], p)); const d = all.filter(n => isDone(n, p)).length; return `<button role="tab" aria-selected="${t === sel}" class="trader-tab ${t === sel ? 'on' : ''}" data-act="trader" data-t="${attr(t)}">${traderImg(t, 'tt-big')}<span class="tn">${esc(t)}</span><span class="tp">${d}/${all.length}</span></button>`; }).join('')}
   </div>
   ${perksNotesHtml('traders')}
+  ${IX.tourGates?.[sel] && !traderUnlocked(sel, p) ? `<div class="notice">${icon('lock')}<div><b>${esc(sel)}</b> is still locked. It unlocks in the story chapter <b>Tour</b> at step <b>${esc(IX.tourGates[sel].step)}</b>. Tick that step in the Main Story tab (or any ${esc(sel)} quest) to unlock it here.</div></div>` : ''}
   <section class="panel trader-panel">
     <div class="trader-hero">${img(T.img, sel, 'trader-portrait')}
       <div class="trader-info">

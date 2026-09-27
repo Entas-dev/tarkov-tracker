@@ -1,7 +1,8 @@
 // Dataset indexing + progress logic (availability, regressive completion, item needs)
 import { store } from './store.js';
 
-export const TRADER_ORDER = ['Prapor', 'Therapist', 'Fence', 'Skier', 'Peacekeeper', 'Mechanic', 'Ragman', 'Jaeger', 'Ref', 'Lightkeeper', 'BTR Driver'];
+// default = unlock order in the Tour story chapter; replaced at runtime by the order parsed from the wiki
+export const TRADER_ORDER = ['Therapist', 'Ragman', 'Skier', 'Mechanic', 'Prapor', 'Peacekeeper', 'Jaeger', 'Fence', 'Ref', 'Lightkeeper', 'BTR Driver'];
 export const ENDINGS = ['Savior', 'Debtor', 'Survivor', 'Fallen'];
 
 export let D = null;
@@ -89,14 +90,22 @@ function buildIndexes() {
     }
     IX.graph[mode] = { dep };
   }
-  // topological order (by normal graph), tie-break by min level, trader order, name
+  // traders unlocked through the Tour chapter (Skier, Mechanic, Prapor, Peacekeeper …)
+  const tour = D.chapters?.['Tour'];
+  IX.tourGates = {};
+  (tour?.traderUnlocks || []).forEach((u, i) => { const idx = tour.objectives.findIndex(o => o.id === u.oid); if (idx >= 0) IX.tourGates[u.trader] = { oid: u.oid, idx, step: u.step, stage: i + 1 }; });
+  const unlocked = Object.keys(IX.tourGates);
+  const tOrder = unlocked.length ? [...TRADER_ORDER.filter(t => !unlocked.includes(t) && TRADER_ORDER.indexOf(t) < TRADER_ORDER.indexOf('Skier')), ...unlocked, ...TRADER_ORDER.filter(t => !unlocked.includes(t) && TRADER_ORDER.indexOf(t) > TRADER_ORDER.indexOf('Skier'))] : TRADER_ORDER;
+  IX.traderOrder = tOrder;
+  const stageOf = (t) => IX.tourGates[t]?.stage || 0;
+  // topological order (by normal graph); early quests follow the Tour unlock order of their trader, then level
   const indeg = {}; const out = {};
   for (const q of Object.values(Q)) { indeg[q.name] = 0; out[q.name] = []; }
   for (const q of Object.values(Q)) for (const g of q.pre) for (const a of g) { if (out[a.q]) { out[a.q].push(q.name); indeg[q.name]++; } }
   const effLevel = (q) => Math.max(q.minLevel || 0, (q.ll && D.traders[q.ll.trader]?.ll?.find(l => l.level === q.ll.level)?.pmcLevel) || 0);
   IX.effLevel = (n) => effLevel(Q[n]);
-  const key = (n) => { const q = Q[n]; const ti = TRADER_ORDER.indexOf(q.trader); return [effLevel(q), ti < 0 ? 99 : ti, n]; };
-  const cmp = (a, b) => { const A = key(a), B = key(b); for (let i = 0; i < 3; i++) { if (A[i] < B[i]) return -1; if (A[i] > B[i]) return 1; } return 0; };
+  const key = (n) => { const q = Q[n]; const ti = tOrder.indexOf(q.trader); const st = stageOf(q.trader); return [Math.max(effLevel(q), st ? 1 + 2 * st : 0), st, effLevel(q), ti < 0 ? 99 : ti, n]; };
+  const cmp = (a, b) => { const A = key(a), B = key(b); for (let i = 0; i < A.length; i++) { if (A[i] < B[i]) return -1; if (A[i] > B[i]) return 1; } return 0; };
   let ready = Object.keys(indeg).filter(n => indeg[n] === 0).sort(cmp);
   const order = [];
   const depth = {};
@@ -117,7 +126,7 @@ function buildIndexes() {
 
   // traders
   const traders = new Set(Object.values(Q).map(q => q.trader).filter(Boolean));
-  IX.traders = [...TRADER_ORDER.filter(t => traders.has(t) || D.traders[t]), ...[...traders].filter(t => !TRADER_ORDER.includes(t)).sort()];
+  IX.traders = [...tOrder.filter(t => traders.has(t) || D.traders[t]), ...[...traders].filter(t => !tOrder.includes(t)).sort()];
   IX.byTrader = {};
   for (const n of order) { const t = Q[n].trader || 'Other'; (IX.byTrader[t] = IX.byTrader[t] || []).push(n); }
 
@@ -200,6 +209,7 @@ export function questStatus(q, p = P()) {
   for (const g of preOf(q)) if (!groupSatisfied(g, p)) reasons.push({ k: 'pre', g });
   if (q.minLevel && p.settings.level < q.minLevel) reasons.push({ k: 'level', v: q.minLevel });
   if (q.ll && q.ll.trader && traderLL(q.ll.trader, p) < q.ll.level) reasons.push({ k: 'll', v: q.ll });
+  if (!traderUnlocked(q.trader, p)) reasons.push({ k: 'tour', trader: q.trader, step: IX.tourGates[q.trader].step });
   return { s: reasons.length ? 'locked' : 'available', reasons };
 }
 
@@ -227,9 +237,25 @@ export function prerequisiteClosure(name, p = P()) {
   return out;
 }
 
+export function traderUnlocked(trader, p = P()) {
+  const g = IX.tourGates?.[trader];
+  if (!g) return true;
+  return !!p.ch['Tour'] || !!p.chObj[`Tour|${g.oid}`];
+}
+// Tour objectives that must be done to have unlocked the traders of these quests
+export function tourStepsFor(names, p = P()) {
+  const tour = D.chapters?.['Tour'];
+  if (!tour || p.ch['Tour']) return [];
+  let max = -1;
+  for (const n of names) { const t = D.quests[n]?.trader; const g = IX.tourGates?.[t]; if (g && !traderUnlocked(t, p)) max = Math.max(max, g.idx); }
+  if (max < 0) return [];
+  return tour.objectives.slice(0, max + 1).filter(o => !o.optional && !p.chObj[`Tour|${o.id}`]).map(o => o.id);
+}
+
 export function completeQuest(name) {
   const add = prerequisiteClosure(name);
-  store.update(p => { p.quests[name] = 1; for (const n of add) p.quests[n] = 1; });
+  const tourIds = tourStepsFor([name, ...add]);
+  store.update(p => { p.quests[name] = 1; for (const n of add) p.quests[n] = 1; for (const id of tourIds) p.chObj[`Tour|${id}`] = 1; });
   return add.size;
 }
 

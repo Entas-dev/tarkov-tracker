@@ -1,6 +1,6 @@
 // App bootstrap, header, routing, global actions
 import { store, PROFILES } from './store.js';
-import { D, IX, setDataset, P, visible, isDone, completeQuest, prerequisiteClosure, doneDependents, uncompleteQuests, questObjProgress, objKey, chapterClosure, chDone, chapterProgress, hLevel, setModuleLevel, hideoutDependents, objVisibleForEnding, objApplies, condStatus, questStatus } from './model.js';
+import { D, IX, setDataset, P, visible, isDone, completeQuest, prerequisiteClosure, tourStepsFor, doneDependents, uncompleteQuests, questObjProgress, objKey, chapterClosure, chDone, chapterProgress, hLevel, setModuleLevel, hideoutDependents, objVisibleForEnding, objApplies, condStatus, questStatus } from './model.js';
 import { esc, attr, icon, img, initTooltips, hideTip, confirmDialog, toast, $, $$ } from './ui.js';
 import { expanded, openQuestInfo, openChapterInfo, openItemInfo, openWikiPage, openModuleInfo, closeDrawer } from './components.js';
 import { renderStory, renderKappa, renderTraders, renderQuests } from './tabs-quests.js';
@@ -154,7 +154,8 @@ async function toggleObjective(qname, oid) {
   if (o?.kind === 'handover') for (const x of q.objectives) if (x.kind === 'find' && x.items?.some(i => o.items?.some(j => j.item === i.item))) extra.push(x.id, ...descendants(q.objectives, x.id));
   undoSnap = snapshot();
   const pre = [...prerequisiteClosure(qname)].filter(n => !isDone(n));
-  store.update(p => { p.obj[key] = 1; for (const id of extra) p.obj[objKey(qname, id)] = 1; for (const n of pre) p.quests[n] = 1; });
+  const tourIds = tourStepsFor([qname, ...pre]);
+  store.update(p => { p.obj[key] = 1; for (const id of extra) p.obj[objKey(qname, id)] = 1; for (const n of pre) p.quests[n] = 1; for (const id of tourIds) p.chObj[`Tour|${id}`] = 1; });
   if (pre.length) withUndo(`${pre.length} earlier quest${pre.length > 1 ? 's' : ''} of <b>${esc(qname)}</b> checked too`);
   const pr = questObjProgress(q);
   if (pr.total && pr.done === pr.total) { const n = completeQuest(qname); toast(`All objectives done – <b>${esc(qname)}</b> completed${n ? ` (+${n} prerequisites)` : ''}`); }
