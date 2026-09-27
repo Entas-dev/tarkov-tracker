@@ -245,6 +245,8 @@ export function parseQuest(title, wt, meta = {}) {
   for (const n of bulletTree(rewBody)) {
     if (n.text) continue;
     q.rewardsHtml.push({ html: inlineHtml(n.raw), sub: (n.children || []).map(c => inlineHtml(c.raw)) });
+    const em = plain(n.raw).match(/^\+?\s*([\d,]+)\s*EXP\b/i);
+    if (em && !q.exp) q.exp = num(em[1]);
   }
   q.seasonal.push(...seasonalNotes(rewBody).map(n => ({ ...n, where: 'rewards' })));
   // Related quest items (guide tables)
@@ -582,6 +584,20 @@ export function parseEvents(wt) {
     if (out.length >= 12) break;
   }
   return out;
+}
+
+// Character level table: [{level, total}] (cumulative EXP)
+export function parseExperience(wt) {
+  const sec = section(wt, 'Character levels') || '';
+  const out = [];
+  for (const tb of tables(sec)) {
+    for (const r of tb.rows) {
+      if (r.length < 3) continue;
+      const lvl = num(r[r.length - 3]?.raw), total = num(r[r.length - 1]?.raw);
+      if (lvl != null && total != null && lvl >= 1 && lvl <= 100 && Number.isInteger(lvl)) out.push({ level: lvl, total });
+    }
+  }
+  return out.sort((a, b) => a.level - b.level);
 }
 
 export function parseSeasons(wt) {

@@ -77,6 +77,7 @@ export function questTooltip(name) {
   const st = questStatus(q, p);
   const rows = [];
   const ok = (b) => b ? `<span class="t-ok">${icon('check')}</span>` : `<span class="t-no">${icon('x')}</span>`;
+  if (IX.startGate && !(p.ch['Tour'] || p.chObj['Tour|' + IX.startGate.oid])) rows.push(`${ok(false)} ${esc(IX.startGate.step)} <span class="muted">(Tour, first step)</span>`);
   if (IX.tourGates?.[q.trader]) rows.push(`${ok(traderUnlocked(q.trader, p))} ${esc(q.trader)} unlocked <span class="muted">(Tour: ${esc(IX.tourGates[q.trader].step)})</span>`);
   { const ms = (q.maps || []).filter(Boolean); if (ms.length && ms.every(m => IX.mapGates?.[m])) { const first = ms.slice().sort((a, b) => IX.mapGates[a].idx - IX.mapGates[b].idx)[0]; rows.push(`${ok(questMapsUnlocked(q, p))} Access to ${esc(ms.join(' or '))} <span class="muted">(Tour: ${esc(IX.mapGates[first].step)})</span>`); } }
   if (q.minLevel) rows.push(`${ok(p.settings.level >= q.minLevel)} PMC level ${q.minLevel}`);

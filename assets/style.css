@@ -382,6 +382,23 @@ a.wl:hover { border-bottom-style: solid; }
 .season .ev-tag { background: var(--season); }
 @media (max-width: 600px) { .ev-img { display: none; } }
 
+/* speedrun */
+.raids { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; counter-reset: none; }
+.raid { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: var(--radius); padding: 10px 12px; }
+.raid-h { display: flex; align-items: center; gap: 12px; }
+.raid-n { display: grid; place-items: center; width: 36px; height: 36px; flex: none; background: var(--accent); color: var(--accent-ink); font-family: var(--font-h); font-weight: 700; font-size: 20px; border-radius: 2px; }
+.raid-t { flex: 1; min-width: 0; }
+.raid-t h2 { font-size: 22px; }
+.raid-bring { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 8px 0 0 48px; }
+.raid-b { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 8px; margin: 8px 0 0 48px; }
+.raid-q { background: var(--bg2); border: 1px solid var(--line); border-radius: var(--radius); padding: 6px 8px; }
+.raid-q.tour-q { border-color: var(--accent2); }
+.raid-qh { display: flex; align-items: center; gap: 6px; font-weight: 600; }
+.raid-qh .ibtn { margin-left: auto; width: 26px; height: 26px; }
+.raid-q .objs { margin-top: 4px; }
+.raid-after { margin: 8px 0 0 48px; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+@media (max-width: 600px) { .raid-bring, .raid-b, .raid-after { margin-left: 0; } }
+
 /* season perks */
 .perk-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px solid color-mix(in srgb, var(--season) 40%, var(--line)); }
 .perk-lbl { font-family: var(--font-h); text-transform: uppercase; font-weight: 700; font-size: 13px; color: var(--season); }

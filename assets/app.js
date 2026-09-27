@@ -9,9 +9,11 @@ import { loadDataset, buildLive, isStale, ageText, loadGameReqs } from './data.j
 let gameReqs = null;
 import { initMapPanel, openMap } from './mappanel.js';
 import { perksBannerHtml, openPerks, togglePerk } from './perks.js';
+import { renderSpeedrun } from './speedrun.js';
 
 const TABS = [
   { id: 'story', label: 'Main Story', render: renderStory },
+  { id: 'speedrun', label: 'Speedrun', render: renderSpeedrun },
   { id: 'kappa', label: 'Kappa', render: renderKappa },
   { id: 'hideout', label: 'Hideout', render: renderHideout },
   { id: 'traders', label: 'Traders', render: renderTraders },
@@ -337,6 +339,7 @@ function onClick(e) {
     case 'setll': store.update(pp => { pp.settings.ll = pp.settings.ll || {}; if (b.dataset.l === '') delete pp.settings.ll[b.dataset.t]; else pp.settings.ll[b.dataset.t] = +b.dataset.l; }); break;
     case 'hlevel': setHideout(b.dataset.m, +b.dataset.l); break;
     case 'hf': store.setUi('hf', b.dataset.v); render(); break;
+    case 'sr': store.setUi('sr', { ...(store.ui.sr || { n: 10, exp: 4000 }), [b.dataset.k]: +b.dataset.v }); render(); break;
     case 'prestige': { const l = +b.dataset.l; store.update(pp => { if (pp.prestige[l]) { for (const k of Object.keys(pp.prestige)) if (+k >= l) delete pp.prestige[k]; } else for (let i = 1; i <= l; i++) pp.prestige[i] = 1; }); break; }
     case 'pman': store.update(pp => { const k = b.dataset.k; if (pp.prestigeManual[k]) delete pp.prestigeManual[k]; else pp.prestigeManual[k] = 1; }); break;
     case 'bp': store.update(pp => { const l = b.dataset.l; if (pp.bp[l]) delete pp.bp[l]; else pp.bp[l] = 1; }); break;

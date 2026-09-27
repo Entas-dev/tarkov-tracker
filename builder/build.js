@@ -3,7 +3,7 @@ import { Wiki } from './wiki.js';
 import { links, tables, plain, normTitle, WIKI_BASE } from './wikitext.js';
 import {
   parseQuest, parseStoryChapter, parseEndings, parseTrader, parseHideout, parsePrestige,
-  parseBattlePass, parseAchievements, parseEvents, parseSeasons, classifyPage,
+  parseBattlePass, parseAchievements, parseEvents, parseSeasons, parseExperience, classifyPage,
 } from './parse.js';
 
 export const DATASET_VERSION = 2;
@@ -25,7 +25,7 @@ export async function buildDataset({ wiki = new Wiki(), log = console.log, progr
   const meta = await wiki.meta(questTitles);
   const activeQuests = questTitles.filter(t => !meta[t]?.cats.has('Historical content'));
 
-  const special = ['Hideout', 'Prestige', 'BattlePass', 'Achievements', 'Events', 'Seasons', 'Endings', 'Story chapters'];
+  const special = ['Hideout', 'Prestige', 'BattlePass', 'Achievements', 'Events', 'Seasons', 'Endings', 'Story chapters', 'Experience'];
   step(0.1, `Downloading ${activeQuests.length} quests + chapters + traders`);
   const pages = await wiki.wikitext([...activeQuests, ...traderTitles, ...chapterCat, ...special]);
 
@@ -65,6 +65,7 @@ export async function buildDataset({ wiki = new Wiki(), log = console.log, progr
   const events = parseEvents(pages['Events'].wikitext);
   const season = parseSeasons(pages['Seasons'].wikitext);
   const endings = parseEndings(pages['Endings'].wikitext);
+  const expTable = parseExperience(pages['Experience']?.wikitext || '');
 
   // ---- linked pages -> items / maps
   step(0.5, 'Collecting linked items');
@@ -212,6 +213,6 @@ export async function buildDataset({ wiki = new Wiki(), log = console.log, progr
   step(1, 'Done');
   return {
     meta: { version: DATASET_VERSION, builtAt: new Date().toISOString(), source: WIKI_BASE, requests: wiki.requests, ms: Date.now() - t0, questCount: Object.keys(quests).length },
-    quests, chapters, chapterOrder: chapterTitles, endings, traders, hideout, prestige, battlepass, achievements, events, season, items, maps,
+    quests, chapters, chapterOrder: chapterTitles, endings, expTable, traders, hideout, prestige, battlepass, achievements, events, season, items, maps,
   };
 }

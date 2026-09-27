@@ -103,6 +103,8 @@ function buildIndexes() {
   const unlocked = Object.keys(IX.tourGates);
   const tOrder = unlocked.length ? [...TRADER_ORDER.filter(t => !unlocked.includes(t) && TRADER_ORDER.indexOf(t) < TRADER_ORDER.indexOf('Skier')), ...unlocked, ...TRADER_ORDER.filter(t => !unlocked.includes(t) && TRADER_ORDER.indexOf(t) > TRADER_ORDER.indexOf('Skier'))] : TRADER_ORDER;
   IX.traderOrder = tOrder;
+  // the very first Tour step (escaping the Ground Zero tutorial) comes before any trader or other map
+  IX.startGate = tour?.objectives?.[0] && /ground zero/i.test(tour.objectives[0].text) ? { oid: tour.objectives[0].id, idx: 0, step: tour.objectives[0].text, map: 'Ground Zero' } : null;
   IX.mapGates = {};
   for (const u of tour?.mapUnlocks || []) { const idx = tour.objectives.findIndex(o => o.id === u.oid); if (idx >= 0) IX.mapGates[u.map] = { oid: u.oid, idx, step: u.step }; }
   // Tour objective index a quest waits for (trader unlock and/or access to one of its maps), -1 = none
@@ -225,7 +227,8 @@ export function questStatus(q, p = P()) {
   for (const g of preOf(q)) if (!groupSatisfied(g, p)) reasons.push({ k: 'pre', g });
   if (q.minLevel && p.settings.level < q.minLevel) reasons.push({ k: 'level', v: q.minLevel });
   if (q.ll && q.ll.trader && traderLL(q.ll.trader, p) < q.ll.level) reasons.push({ k: 'll', v: q.ll });
-  if (!traderUnlocked(q.trader, p)) reasons.push({ k: 'tour', trader: q.trader, step: IX.tourGates[q.trader].step });
+  if (!startDone(p)) reasons.push({ k: 'start', step: IX.startGate.step });
+  else if (!traderUnlocked(q.trader, p)) reasons.push({ k: 'tour', trader: q.trader, step: IX.tourGates[q.trader].step });
   if (!questMapsUnlocked(q, p)) reasons.push({ k: 'map', maps: q.maps });
   return { s: reasons.length ? 'locked' : 'available', reasons };
 }
@@ -259,7 +262,12 @@ export function traderUnlocked(trader, p = P()) {
   if (!g) return true;
   return !!p.ch['Tour'] || !!p.chObj[`Tour|${g.oid}`];
 }
+export function startDone(p = P()) {
+  const g = IX.startGate;
+  return !g || !!p.ch['Tour'] || !!p.chObj[`Tour|${g.oid}`];
+}
 export function mapUnlocked(map, p = P()) {
+  if (!startDone(p) && map !== IX.startGate?.map) return false;
   const g = IX.mapGates?.[map];
   if (!g) return true;
   return !!p.ch['Tour'] || !!p.chObj[`Tour|${g.oid}`];
@@ -274,7 +282,7 @@ export function questMapsUnlocked(q, p = P()) {
 export function tourStepsFor(names, p = P()) {
   const tour = D.chapters?.['Tour'];
   if (!tour || p.ch['Tour']) return [];
-  let max = -1;
+  let max = !startDone(p) && names.length ? 0 : -1;
   for (const n of names) {
     const q = D.quests[n];
     if (!q) continue;
