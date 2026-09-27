@@ -1,5 +1,5 @@
 // Quest cards, objective lists, info drawer
-import { D, IX, P, visible, condStatus, traderUnlocked, questMapsUnlocked, questStatus, isDone, questNeeds, questObjProgress, objDone, cntKey, isSeasonal, preOf, traderLL, varNeed } from './model.js';
+import { D, IX, P, visible, condStatus, traderUnlocked, questMapsUnlocked, questStatus, isDone, questNeeds, questObjProgress, objDone, cntKey, isSeasonal, preOf, traderLL, varNeed, chReqMet } from './model.js';
 import { esc, attr, icon, img, traderImg, qlink, itemChip, statusBadge, wikiHref, wikiSectionHtml, fmt, progressBar } from './ui.js';
 import { lootData, lootState, ensureLoot, itemIndex, lootItem, itemImg, bestMaps, whereText, itemContainers, mapDisplayName } from './loot.js';
 
@@ -126,7 +126,7 @@ export function openQuestInfo(name) {
   const kapG = preOf(q).filter(g => g.every(a => a.kappa));
   if (kapG.length) { const vis = kapG.filter(g => visible(D.quests[g[0].q], p)); const dn = vis.filter(g => isDone(g[0].q, p)).length; reqs.push(`Complete all Kappa-required quests <span class="muted">(${dn}/${vis.length} done – see the Kappa tab)</span>`); }
   for (const g of preOf(q).filter(g => !g.every(a => a.kappa))) reqs.push(g.map(a => `${a.type === 'accept' ? 'Accept ' : a.type === 'fail' ? 'Fail ' : 'Complete '}${qlink(a.q)}${a.delay ? ` <span class="muted">(+${esc(a.delay)})</span>` : ''}`).join(' <b>or</b> '));
-  for (const r of q.reqHtml) if (!/level|loyalty|must complete|unlocks .* after|must accept/i.test(r.html.replace(/<[^>]+>/g, ''))) reqs.push(r.html);
+  for (const r of q.reqHtml) if (!/level|loyalty|must complete|unlocks .* after|must accept/i.test(r.html.replace(/<[^>]+>/g, ''))) reqs.push(r.html + ((q.chReq || []).some(c => c.html === r.html) ? (q.chReq.find(c => c.html === r.html) && chReqMet(q.chReq.find(c => c.html === r.html), p) ? ' <span class="t-ok">✓</span>' : ' <span class="muted">(not yet – tick it in the story chapter)</span>') : ''));
   const qi = q.questItems?.length ? `<div class="sub-h">Quest items (wiki table)</div><table class="tbl"><thead><tr><th>Item</th><th>Amount</th><th>Requirement</th><th>FiR</th><th>Notes</th></tr></thead><tbody>${q.questItems.map(r => `<tr><td>${r.item && D.items[r.item] ? itemChip(r.item, { small: true }) : r.html}</td><td>${fmt(r.amount) || ''}</td><td>${esc(r.req)}</td><td>${r.fir === true ? '<span class="fir">FiR</span>' : r.fir === false ? 'No' : '–'}</td><td>${r.notes}</td></tr>`).join('')}</tbody></table>` : '';
   const html = `
     ${q.img ? `<div class="banner">${img(q.img, q.name, 'banner-img')}</div>` : ''}

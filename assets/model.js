@@ -76,6 +76,29 @@ function buildIndexes() {
     q.allMaps = [...new Set([...(q.maps || []), ...q.objectives.flatMap(o => o.maps || [])])];
     q.slug = q.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
   }
+  // requirements on a story-chapter step ("Hand over the hard drives … in the Boreas story chapter")
+  const nrm = (t) => String(t || '').toLowerCase().replace(/<[^>]+>/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+  for (const q of Object.values(Q)) {
+    q.chReq = [];
+    for (const r of q.reqHtml || []) {
+      for (const m of r.html.matchAll(/data-t="([^"]+)"/g)) {
+        const ch = m[1];
+        if (ch === 'Tour' || !D.chapters?.[ch] || q.chReq.some(c => c.ch === ch)) continue;
+        const text = nrm(r.html).replace(new RegExp(`\\s*in the ${nrm(ch)} story chapter.*$`), '').trim();
+        const key = text.slice(0, 40);
+        let oids = D.chapters[ch].objectives.filter(o => { const t = nrm(o.text); return t && (t.startsWith(key) || text.startsWith(t.slice(0, 40))); }).map(o => o.id);
+        if (!oids.length) { // wording differs between pages: best word overlap
+          const STOP = new Set(['the', 'a', 'an', 'to', 'on', 'in', 'of', 'from', 'with', 'and', 'or', 'for', 'at', 'that', 'you', 'your', 'over']);
+          const words = (t) => new Set(nrm(t).split(' ').filter(w => w.length > 1 && !STOP.has(w)));
+          const want = words(text);
+          let best = null, bestN = 2;
+          for (const o of D.chapters[ch].objectives) { let n = 0; for (const w of words(o.text)) if (want.has(w)) n++; if (n > bestN) { bestN = n; best = o; } }
+          if (best) oids = [best.id];
+        }
+        q.chReq.push({ ch, oids, html: r.html });
+      }
+    }
+  }
   // quest series ("Gunsmith - …", "… - Part N"): earlier members by part number, otherwise by unlock level
   const lvlOf = (q) => Math.max(q.minLevel || 0, (q.ll && D.traders[q.ll.trader]?.ll?.find(l => l.level === q.ll.level)?.pmcLevel) || 0);
   const groups = {};
@@ -242,6 +265,7 @@ export function varValue(id, p = P()) {
   if (ll > info.tier) { const idx = gs.filter(t => t <= est).length - 1; est = Math.max(est, gs[Math.min(gs.length - 1, Math.max(0, idx) + (ll - info.tier))]); }
   return Math.max(ev, est);
 }
+export const chReqMet = (c, p = P()) => !!p.ch[c.ch] || c.oids.some(id => p.chObj[`${c.ch}|${id}`]);
 export function varNeed(x, p = P()) { return Math.max(0, x.min - varValue(x.v, p)); }
 
 export function groupSatisfied(g, p = P()) {
@@ -265,6 +289,7 @@ export function questStatus(q, p = P()) {
   if (q.minLevel && p.settings.level < q.minLevel) reasons.push({ k: 'level', v: q.minLevel });
   if (q.ll && q.ll.trader && traderLL(q.ll.trader, p) < q.ll.level) reasons.push({ k: 'll', v: q.ll });
   for (const x of q.vars || []) if (varValue(x.v, p) < x.min) reasons.push({ k: 'var', x });
+  for (const c of q.chReq || []) if (!chReqMet(c, p)) reasons.push({ k: 'chapter', c });
   if (!startDone(p)) reasons.push({ k: 'start', step: IX.startGate.step });
   else if (!traderUnlocked(q.trader, p)) reasons.push({ k: 'tour', trader: q.trader, step: IX.tourGates[q.trader].step });
   if (!questMapsUnlocked(q, p)) reasons.push({ k: 'map', maps: q.maps });
