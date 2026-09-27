@@ -747,3 +747,8 @@ input[type=number], input[type=search], select { background: var(--bg2); border-
 .td-sec blockquote { margin: 0; }
 .td .obj-sec { font-size: 16px; margin: 10px 0 2px; padding-top: 6px; }
 .td .obj-cond { margin: 8px 0 2px; }
+@media (max-width: 720px) {
+  .top { position: static; }
+  .top-row { gap: 8px; }
+  .tabs { padding: 4px 8px 6px; }
+}
