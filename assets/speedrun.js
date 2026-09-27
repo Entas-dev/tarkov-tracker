@@ -246,7 +246,7 @@ export function renderSpeedrun(root) {
     const br = bring(r);
     const lt = raidLoot[i];
     const ltTop = lt.filter(x => x.prio >= 2).slice(0, 8);
-    const ltRest = lt.filter(x => !ltTop.includes(x));
+    const ltRest = lt.filter(x => !ltTop.includes(x)).slice(0, 30);
     return `<li class="raid">
       <div class="raid-h"><span class="raid-n">${i + 1}</span><div class="raid-t"><h2>${esc(r.map)}</h2><div class="small muted">${r.entries.length} objective${r.entries.length > 1 ? 's' : ''} · ${Object.keys(byQ).length} quest${Object.keys(byQ).length !== 1 ? 's' : ''}${tourE.length ? ' + Tour' : ''} · est. level ${r.level}${r.levelAfter > r.level ? ` → ${r.levelAfter}` : ''}</div></div>
         <button class="btn btn-s" data-act="map" data-map="${attr(r.map)}">${icon('map')} Map</button></div>
@@ -258,7 +258,7 @@ export function renderSpeedrun(root) {
       </div>
       ${lt.length ? `<div class="raid-loot"><div class="raid-lh">${icon('box')} <span class="small"><b>Grab on ${esc(r.map)}</b> – items you still need for quests / hideout that spawn here</span></div>
         ${ltTop.length ? `<div class="chips">${ltTop.map(x => lootChip(x, r.map)).join('')}</div>` : ''}
-        ${ltRest.length ? `<details class="raid-more"><summary class="small">${ltTop.length ? 'More' : 'Items for later'} (${ltRest.length})</summary><div class="chips">${ltRest.slice(0, 60).map(x => lootChip(x, r.map)).join('')}</div></details>` : ''}</div>` : ''}
+        ${ltRest.length ? `<details class="raid-more"><summary class="small">${ltTop.length ? 'More' : 'Items for later'} (${ltRest.length})</summary><div class="chips">${ltRest.map(x => lootChip(x, r.map)).join('')}</div></details>` : ''}</div>` : ''}
       ${r.turnIns.length || r.tourAfter.length || r.lootQuests?.length ? `<div class="raid-after"><span class="small muted">After the raid:</span> ${r.tourAfter.length ? `<span class="small">Tour: ${r.tourAfter.map(o => o.text).map(esc).join(' → ')}</span>` : ''} ${r.turnIns.length ? `<span class="small">hand in ${r.turnIns.map(n => qlink(n)).join(', ')}</span>` : ''}${r.lootQuests?.length ? ` <span class="small">· unlocked item quests: ${r.lootQuests.map(n => qlink(n)).join(', ')}</span>` : ''}</div>` : ''}
     </li>`;
   }).join('') || '<div class="empty">Nothing to plan – every available quest objective is done, or the next quests need a higher level / trader loyalty.</div>'}</ol>
@@ -273,8 +273,8 @@ function srcText(x) {
 function lootChip(x, map) {
   const it = lootItem(x.li);
   const I = D.items[x.item] || {};
-  const tip = `${whereText(x.f)}${x.best ? ' · best map for this item' : ''} — for ${srcText(x)}`;
-  return `<span class="chip chip-s lchip lp${x.prio}" data-tip="${attr(tip)}">${img(I.img || itemImg(it), x.item, 'chip-img')}<span class="chip-name" data-item="${attr(x.item)}">${esc(x.item)}</span><span class="ic-count">${fmt(x.missing)}</span>${x.fir ? '<span class="fir">FiR</span>' : ''}${x.best ? `<span class="lbest" aria-label="best map">${icon('star')}</span>` : ''}<button class="ibtn ibtn-s" data-act="loot-show" data-item="${attr(x.item)}" data-map="${attr(map)}" aria-label="Show spawns on the map">${icon('map')}</button></span>`;
+  const tip = `${whereText(x.f)}${x.best ? ' · best map for this item' : ''} — ${x.soonMissing && x.soonMissing < x.missing ? `${x.soonMissing} needed soon, ${x.missing} in total` : `${x.missing} needed`}: ${srcText(x)}`;
+  return `<span class="chip chip-s lchip lp${x.prio}" data-tip="${attr(tip)}">${img(I.img || itemImg(it), x.item, 'chip-img')}<span class="chip-name" data-item="${attr(x.item)}">${esc(x.item)}</span><span class="ic-count">${fmt(x.soonMissing || x.missing)}</span>${x.fir ? '<span class="fir">FiR</span>' : ''}${x.best ? `<span class="lbest" aria-label="best map">${icon('star')}</span>` : ''}<button class="ibtn ibtn-s" data-act="loot-show" data-item="${attr(x.item)}" data-map="${attr(map)}" aria-label="Show spawns on the map">${icon('map')}</button></span>`;
 }
 function lootPlanHtml(plan, needs, raidLoot, ld) {
   if (!ld) {
@@ -284,7 +284,7 @@ function lootPlanHtml(plan, needs, raidLoot, ld) {
   }
   const inRaids = new Map();
   raidLoot.forEach((lt, i) => { for (const x of lt) { const a = inRaids.get(x.item) || []; a.push(i); inRaids.set(x.item, a); } });
-  const top = needs.filter(n => n.prio >= 2).sort((a, b) => b.prio - a.prio || b.missing - a.missing);
+  const top = needs.filter(n => n.prio >= 2).sort((a, b) => b.prio - a.prio || (inRaids.get(b.item)?.length ? 1 : 0) - (inRaids.get(a.item)?.length ? 1 : 0) || b.soonMissing - a.soonMissing);
   const noSpawn = plan.loot.filter(a => !needs.some(n => n.item === a.item && bestMaps(n.li).length));
   const lim = store.ui.srLootLim || 30;
   return `<section class="panel"><div class="panel-h"><h2>Loot plan</h2><span class="small muted">Items your open quests, the story and your next hideout levels still need – where they spawn best and in which of the planned raids you can grab them</span></div>
@@ -293,7 +293,7 @@ function lootPlanHtml(plan, needs, raidLoot, ld) {
       const bm = bestMaps(n.li).slice(0, 3);
       const rs = inRaids.get(n.item) || [];
       return `<div class="lp-row lp${n.prio}">${img(I.img || itemImg(it), n.item, 'i-ic')}
-        <div class="lp-main"><div><span class="chip-name" data-item="${attr(n.item)}" data-tip-item="${attr(n.item)}">${esc(n.item)}</span> <b>×${fmt(n.missing)}</b>${n.fir ? ' <span class="fir">FiR</span>' : ''} <span class="small muted">for ${esc(srcText(n))}</span></div>
+        <div class="lp-main"><div><span class="chip-name" data-item="${attr(n.item)}" data-tip-item="${attr(n.item)}">${esc(n.item)}</span> <b>×${fmt(n.soonMissing || n.missing)}</b>${n.soonMissing && n.soonMissing < n.missing ? ` <span class="small muted">(${fmt(n.missing)} total)</span>` : ''}${n.fir ? ' <span class="fir">FiR</span>' : ''} <span class="small muted">for ${esc(srcText(n))}</span></div>
           <div class="small">${bm.length ? `Best: ${bm.map(b => `<button class="linkbtn" data-act="loot-show" data-item="${attr(n.item)}" data-map="${attr(mapDisplayName(b.key))}" data-tip="${attr(whereText(b))}">${esc(mapDisplayName(b.key))}</button>`).join(', ')}` : '<span class="muted">No spawn data – barter, craft or flea</span>'}${rs.length ? ` · <span class="muted">in your plan:</span> ${rs.slice(0, 4).map(i => `raid ${i + 1} (${esc(plan.raids[i].map)})`).join(', ')}${rs.length > 4 ? ' …' : ''}` : ''}</div></div></div>`;
     }).join('') || '<div class="empty small">No quest or next-level hideout items missing.</div>'}</div>
     ${top.length > lim ? `<button class="btn more" data-act="more" data-k="srLootLim">Show more (${top.length - lim} hidden)</button>` : ''}

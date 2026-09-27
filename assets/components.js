@@ -158,7 +158,7 @@ function spawnHtml(name) {
   const ld = lootData();
   if (!ld) { if (lootState() !== 'missing') ensureLoot(); return lootState() === 'missing' ? '' : '<div class="sub-h">Spawns on maps</div><div class="loading small">Loading spawn data…</div>'; }
   const i = itemIndex(name);
-  if (i < 0) return '<div class="sub-h">Spawns on maps</div><p class="small muted">No known loose or container spawn – usually trader, barter, craft or boss loot.</p>';
+  if (i < 0) return '<div class="sub-h">Spawns on maps</div><p class="small muted">No spawn data for this item in the tarkov.dev spawn points or the wiki loot tables – it usually comes from traders, barters, crafts or bosses (or the data is still missing).</p>';
   const bm = bestMaps(i);
   const cs = itemContainers(i);
   return `<div class="sub-h">Spawns on maps <span class="muted">(best odds first)</span></div>

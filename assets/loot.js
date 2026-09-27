@@ -1,7 +1,7 @@
 // Loot index per map: loose-loot spawn points & container positions (tarkov.dev export, refreshed daily)
 // + what each container can hold (wiki loot tables). Used by the map panel, item info and the Speedrun plan.
 import { store } from './store.js';
-import { D, P, shoppingList, questStatus, hLevel, isDone } from './model.js';
+import { D, P, shoppingList, questStatus, hLevel, isDone, levelReqStatus } from './model.js';
 
 // Heuristic weights for "expected finds per raid": a loose spot spawns something only sometimes and picks one
 // of its candidates; a container rolls a few items from its loot table. Only used for ranking, never shown as odds.
@@ -122,7 +122,7 @@ export function whereText(f) {
 }
 
 // ---------- needed items with a priority ----------
-// prio 3: a quest that is available now (or in the plan) needs it · 2: next hideout level / story · 1: later
+// prio 3: a quest that is available now (or in the plan) needs it · 2: next hideout level you can build / story · 1: later
 export function neededLoot(p = P(), soonQuests = null) {
   if (!LD) return [];
   const list = shoppingList({ scope: 'all' }, p);
@@ -130,18 +130,22 @@ export function neededLoot(p = P(), soonQuests = null) {
   for (const a of list) {
     const li = itemIndex(a.item);
     if (li < 0) continue;
-    let prio = 1;
+    let prio = 1, soonN = 0;
     const why = [];
     for (const s of a.sources) {
+      let soon = false;
       if (s.type === 'quest') {
         const q = D.quests[s.name];
-        const soon = soonQuests?.has(s.name) || (q && !isDone(s.name, p) && questStatus(q, p).s === 'available');
+        soon = !!(soonQuests?.has(s.name) || (q && !isDone(s.name, p) && questStatus(q, p).s === 'available'));
         if (soon) prio = Math.max(prio, 3);
-        why.push({ ...s, soon });
-      } else if (s.type === 'chapter') { prio = Math.max(prio, 2); why.push({ ...s, soon: true }); }
-      else if (s.type === 'hideout') { const next = s.level === hLevel(s.name, p) + 1; if (next) prio = Math.max(prio, 2); why.push({ ...s, soon: next }); }
+      } else if (s.type === 'chapter') { soon = true; prio = Math.max(prio, 2); }
+      else if (s.type === 'hideout') { soon = s.level === hLevel(s.name, p) + 1 && levelReqStatus(s.name, s.level, p).ok; if (soon) prio = Math.max(prio, 2); }
+      if (soon) soonN += Math.max(0, s.count - (s.have || 0));
+      why.push({ ...s, soon });
     }
-    out.push({ item: a.item, li, need: a.need, have: a.have, missing: a.need - a.have, fir: a.fir, prio, sources: why });
+    why.sort((x, y) => y.soon - x.soon);
+    const missing = a.need - a.have;
+    out.push({ item: a.item, li, need: a.need, have: a.have, missing, soonMissing: Math.min(missing, soonN), fir: a.fir, prio, sources: why });
   }
   return out;
 }
@@ -158,7 +162,8 @@ export function lootForMap(mapName, needs) {
     const top = best[0]?.score || f.score;
     const rel = f.score / top;
     const rank = best.findIndex(b => b.key === k);
-    if (rel < 0.35 && !(f.loose && n.prio >= 2)) continue;
+    // keep it to maps that are among the best for this item (top 3 or at least 60 % of the best odds)
+    if (rank > 2 && rel < 0.6 && !(f.loose && n.prio === 3)) continue;
     out.push({ ...n, f, rel, best: rank === 0, rank });
   }
   return out.sort((a, b) => b.prio - a.prio || b.rel - a.rel || b.missing - a.missing);
