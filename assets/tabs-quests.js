@@ -194,7 +194,7 @@ export function renderQuests(root) {
   const avail = all.filter(n => questStatus(D.quests[n], p).s === 'available').length;
   const names = applyFilters(IX.order, 'qf');
   root.innerHTML = `
-  <div class="tab-head"><div><h1>All Quests</h1><p class="lede">${all.length} quests for this profile · <b>${avail}</b> available right now at level ${p.settings.level}.</p></div>
+  <div class="tab-head"><div><h1>All Quests</h1><p class="lede">${all.length} quests for this profile · <b>${avail}</b> available right now at level ${p.settings.level}. <button class="btn btn-s" data-act="active-setup">Set my open quests</button></p></div>
     <div class="head-stat">${progressBar(done, all.length, 'All quests')}</div></div>
   ${filterBar('qf')}
   <div class="count-line">${names.length} quests shown</div>

@@ -7,7 +7,7 @@ export const PROFILES = [
 ];
 
 const blankProgress = () => ({
-  quests: {}, obj: {}, cnt: {},
+  quests: {}, active: {}, obj: {}, cnt: {},
   hideout: {}, hcnt: {},
   ch: {}, chObj: {},
   ach: {}, bp: {}, bpDocs: {}, prestige: {}, prestigeManual: {},

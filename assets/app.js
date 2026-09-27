@@ -1,6 +1,6 @@
 // App bootstrap, header, routing, global actions
 import { store, PROFILES } from './store.js';
-import { D, IX, setDataset, P, visible, isDone, completeQuest, prerequisiteClosure, tourStepsFor, doneDependents, uncompleteQuests, questObjProgress, objKey, chapterClosure, chDone, chapterProgress, hLevel, setModuleLevel, hideoutDependents, objVisibleForEnding, objApplies, condStatus, questStatus } from './model.js';
+import { D, IX, setDataset, P, visible, isDone, completeQuest, prerequisiteClosure, tourStepsFor, applyActiveQuests, doneDependents, uncompleteQuests, questObjProgress, objKey, chapterClosure, chDone, chapterProgress, hLevel, setModuleLevel, hideoutDependents, objVisibleForEnding, objApplies, condStatus, questStatus } from './model.js';
 import { esc, attr, icon, img, initTooltips, hideTip, confirmDialog, toast, $, $$ } from './ui.js';
 import { expanded, openQuestInfo, openChapterInfo, openItemInfo, openWikiPage, openModuleInfo, closeDrawer } from './components.js';
 import { renderStory, renderKappa, renderTraders, renderQuests } from './tabs-quests.js';
@@ -9,7 +9,7 @@ import { loadDataset, buildLive, isStale, ageText, loadGameReqs } from './data.j
 let gameReqs = null;
 import { initMapPanel, openMap } from './mappanel.js';
 import { perksBannerHtml, openPerks, togglePerk } from './perks.js';
-import { renderSpeedrun } from './speedrun.js';
+import { renderSpeedrun, openActiveSetup } from './speedrun.js';
 
 const TABS = [
   { id: 'story', label: 'Main Story', render: renderStory },
@@ -26,7 +26,7 @@ const TABS = [
 
 let current = 'story';
 let undoSnap = null;
-function snapshot() { const p = P(); return JSON.stringify({ quests: p.quests, obj: p.obj, ch: p.ch, chObj: p.chObj, choices: p.settings.choices }); }
+function snapshot() { const p = P(); return JSON.stringify({ quests: p.quests, active: p.active, obj: p.obj, ch: p.ch, chObj: p.chObj, choices: p.settings.choices }); }
 function withUndo(msg) { toast(`${msg} <button class="linkbtn" data-act="undo">Undo</button>`, 6000); }
 let lastDrawer = null;
 
@@ -321,7 +321,7 @@ function onClick(e) {
     case 'info-item': (lastDrawer = () => openItemInfo(b.dataset.item))(); break;
     case 'info-mod': (lastDrawer = () => openModuleInfo(b.dataset.m))(); break;
     case 'drawer-close': closeDrawer(); lastDrawer = null; break;
-    case 'undo': if (undoSnap) { const s = JSON.parse(undoSnap); undoSnap = null; store.update(pp => { pp.quests = s.quests; pp.obj = s.obj; pp.ch = s.ch; pp.chObj = s.chObj; pp.settings.choices = s.choices; }); toast('Undone'); } break;
+    case 'undo': if (undoSnap) { const s = JSON.parse(undoSnap); undoSnap = null; store.update(pp => { pp.quests = s.quests; pp.active = s.active || {}; pp.obj = s.obj; pp.ch = s.ch; pp.chObj = s.chObj; pp.settings.choices = s.choices; }); toast('Undone'); } break;
     case 'perks': (lastDrawer = openPerks)(); break;
     case 'map': openMap(b.dataset.map, b.dataset.focus || null); break;
     case 'cnt': {
@@ -339,6 +339,18 @@ function onClick(e) {
     case 'setll': store.update(pp => { pp.settings.ll = pp.settings.ll || {}; if (b.dataset.l === '') delete pp.settings.ll[b.dataset.t]; else pp.settings.ll[b.dataset.t] = +b.dataset.l; }); break;
     case 'hlevel': setHideout(b.dataset.m, +b.dataset.l); break;
     case 'hf': store.setUi('hf', b.dataset.v); render(); break;
+    case 'active-setup': (lastDrawer = openActiveSetup)(); break;
+    case 'active-apply': {
+      const n = Object.keys(P().active || {}).filter(x => D.quests[x] && !isDone(x)).length;
+      if (!n) { toast('Tick at least one open quest first'); break; }
+      undoSnap = snapshot();
+      const before = Object.keys(P().quests).length;
+      applyActiveQuests(b.dataset.mode);
+      const after = Object.keys(P().quests).length;
+      withUndo(`${n} open quest${n > 1 ? 's' : ''} set · ${after} quests now marked done${b.dataset.mode === 'merge' ? ` (+${Math.max(0, after - before)})` : ''}`);
+      break;
+    }
+    case 'active-clear': store.update(pp => { pp.active = {}; }); break;
     case 'sr': store.setUi('sr', { ...(store.ui.sr || { n: 10, exp: 4000 }), [b.dataset.k]: +b.dataset.v }); render(); break;
     case 'prestige': { const l = +b.dataset.l; store.update(pp => { if (pp.prestige[l]) { for (const k of Object.keys(pp.prestige)) if (+k >= l) delete pp.prestige[k]; } else for (let i = 1; i <= l; i++) pp.prestige[i] = 1; }); break; }
     case 'pman': store.update(pp => { const k = b.dataset.k; if (pp.prestigeManual[k]) delete pp.prestigeManual[k]; else pp.prestigeManual[k] = 1; }); break;
@@ -355,6 +367,7 @@ function onClick(e) {
 let searchT = null;
 function onInput(e) {
   const el = e.target;
+  if (el.dataset.as) { store.setUi('asq', el.value); clearTimeout(searchT); searchT = setTimeout(() => { const pos = el.selectionStart; openActiveSetup(); const ni = document.querySelector('input[data-as]'); if (ni) { ni.focus(); try { ni.setSelectionRange(pos, pos); } catch { } } }, 150); return; }
   if (el.dataset.set === 'level') { const v = Math.max(1, Math.min(79, parseInt(el.value, 10) || 1)); store.update(p => { p.settings.level = v; }); return; }
   const fp = el.closest('[data-fprefix]')?.dataset.fprefix;
   const setF = (bucket, key, val, isText) => {
@@ -375,7 +388,7 @@ async function boot() {
   document.addEventListener('click', onClick);
   document.addEventListener('click', onSettingsClick);
   document.addEventListener('input', (e) => { if (e.target.matches('input[type=search]')) onInput(e); });
-  document.addEventListener('change', (e) => { if (e.target.dataset?.perk) { togglePerk(e.target.dataset.perk, e.target.checked); return; } if (e.target.matches('select,input[type=checkbox],input[type=number]') && !e.target.id?.startsWith('s-') && !e.target.closest('.mappanel')) { if (e.target.dataset.set === 'faction') store.update(p => { p.settings.faction = e.target.value; }); else onInput(e); } });
+  document.addEventListener('change', (e) => { if (e.target.dataset?.active) { const n = e.target.dataset.active, on = e.target.checked; store.update(pp => { pp.active = pp.active || {}; if (on) pp.active[n] = 1; else delete pp.active[n]; }); return; } if (e.target.dataset?.perk) { togglePerk(e.target.dataset.perk, e.target.checked); return; } if (e.target.matches('select,input[type=checkbox],input[type=number]') && !e.target.id?.startsWith('s-') && !e.target.closest('.mappanel')) { if (e.target.dataset.set === 'faction') store.update(p => { p.settings.faction = e.target.value; }); else onInput(e); } });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeDrawer(); lastDrawer = null; hideTip(); } });
   addEventListener('hashchange', route);
   matchMedia('(prefers-color-scheme: light)').addEventListener?.('change', () => renderHeader());

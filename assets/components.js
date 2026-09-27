@@ -10,6 +10,7 @@ export function mapChips(maps) {
 
 export function questBadges(q) {
   const b = [];
+  if (P().active?.[q.name] && !isDone(q.name)) b.push('<span class="badge b-active" data-tip="Open in your game (from your active quests)">Active</span>');
   if (IX.kappa.has(q.name)) b.push('<span class="badge b-kappa" data-tip="Required for Kappa (Collector)">Kappa</span>');
   else if (IX.kappaSub.has(q.name)) b.push('<span class="badge b-kappa-sub" data-tip="Not required itself, but a follow-up quest is required for Kappa">Kappa*</span>');
   if (q.trader === 'Lightkeeper') b.push('<span class="badge b-lk">LK</span>');

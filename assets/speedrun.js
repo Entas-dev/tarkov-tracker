@@ -3,6 +3,7 @@
 import { store } from './store.js';
 import { D, IX, P, visible, questStatus, isDone, mapUnlocked, traderUnlocked } from './model.js';
 import { esc, attr, icon, img, traderImg, qlink, itemChip, fmt, progressBar } from './ui.js';
+import { openPanel } from './components.js';
 
 const RAID_KINDS = new Set(['kill', 'visit', 'mark', 'place', 'extract', 'use']);
 const MENU_KINDS = new Set(['handover', 'talk', 'rep', 'sell', 'build']);
@@ -119,7 +120,7 @@ function scoreMap(entries, sp) {
   const perQuest = {};
   for (const e of entries) {
     if (e.kind === 'tour') { s += 4; continue; }
-    s += 1;
+    s += sp.active?.[e.q.name] ? 1.5 : 1;
     (perQuest[e.q.name] = perQuest[e.q.name] || []).push(e.o.id);
   }
   for (const [n, ids] of Object.entries(perQuest)) {
@@ -200,6 +201,7 @@ export function renderSpeedrun(root) {
   root.innerHTML = `
   <div class="tab-head"><div><h1>Speedrun Guide</h1><p class="lede">Your next raids, planned from your current progress: every objective that can be done on the same map is bundled into one raid – across all traders and the Tour chapter. Tick objectives here or anywhere else and the plan recalculates.</p></div>
     <div class="head-stat"><div class="stat"><b>${plan.raids.length}</b> raids · <b>${totalObj}</b> objectives · <b>${totalQ}</b> quests finished</div></div></div>
+  <div class="notice">${icon('list')}<div>Quicker than ticking finished quests: <b>tell the tracker which quests are open in your game</b> and it marks everything before them as done. <button class="btn btn-s btn-p" data-act="active-setup">Set my open quests</button></div></div>
   <div class="filters">
     <span class="small muted">Plan</span>
     <div class="seg" role="radiogroup" aria-label="Number of raids">${[5, 10, 20, 40].map(n => `<button role="radio" aria-checked="${ui.n === n}" class="seg-b ${ui.n === n ? 'on' : ''}" data-act="sr" data-k="n" data-v="${n}">${n} raids</button>`).join('')}</div>
@@ -231,4 +233,33 @@ export function renderSpeedrun(root) {
   ${plan.loot.length ? `<section class="panel"><div class="panel-h"><h2>Loot to keep while raiding</h2><span class="small muted">Items your current/next quests need (no fixed map)</span></div>
     <div class="chips cgrid">${plan.loot.slice(0, 40).map(a => `<span class="chip" data-tip-item="${attr(a.item)}">${img(D.items[a.item]?.img, a.item, 'chip-img')}<span class="chip-name" data-item="${attr(a.item)}">${esc(a.item)}</span><span class="ic-count">${fmt(a.count)}</span>${a.fir ? '<span class="fir">FiR</span>' : ''}</span>`).join('')}</div></section>` : ''}
   <p class="small muted">How it's planned: from your ticked progress the planner simulates raid by raid. Each raid picks the map where you can do the most objectives, preferring Tour steps (they unlock traders and maps) and objectives that finish a quest. After each raid it hands in finished quests and estimates your level from quest EXP plus the EXP-per-raid setting. Objectives that allow several maps are assigned to one of them. Computed in ${ms} ms.</p>`;
+}
+
+// ---------- "my open quests" setup ----------
+export function openActiveSetup() {
+  const p = P();
+  const q = (store.ui.asq || '').toLowerCase().trim();
+  const act = p.active || {};
+  const nAct = Object.keys(act).filter(n => D.quests[n] && !isDone(n, p)).length;
+  const groups = IX.traders.map(t => {
+    const names = (IX.byTrader[t] || []).filter(n => visible(D.quests[n], p) && (!q || n.toLowerCase().includes(q)));
+    if (!names.length) return '';
+    return `<div class="as-g"><div class="sub-h">${traderImg(t, 'mp-tr')} ${esc(t)}</div>${names.map(n => {
+      const done = isDone(n, p), on = !!act[n] && !done;
+      return `<label class="as-row ${done ? 'is-done' : ''} ${on ? 'on' : ''}"><input type="checkbox" data-active="${attr(n)}" ${on ? 'checked' : ''}> <span>${esc(n)}</span>${done ? ' <span class="small muted">done</span>' : ''}</label>`;
+    }).join('')}</div>`;
+  }).join('');
+  openPanel(`${icon('list', 'dr-ic')}<span>My open quests</span>`, `
+    <p class="small">Tick every quest that is <b>currently open</b> in your trader task lists. When you press <b>Apply</b>, every quest those depend on (including earlier parts of the same series and the Tour steps that unlock their trader/map) is marked as done – so you never have to tick finished quests one by one.</p>
+    <div class="as-bar">
+      <label class="search">${icon('search')}<input type="search" data-as="q" placeholder="Search quest name" value="${attr(store.ui.asq || '')}" aria-label="Search quests"></label>
+      <span class="small"><b>${nAct}</b> selected</span>
+    </div>
+    <div class="as-actions">
+      <button class="btn btn-p" data-act="active-apply" data-mode="replace" data-tip="Clears your done list and rebuilds it from the open quests">Apply – rebuild my progress</button>
+      <button class="btn" data-act="active-apply" data-mode="merge" data-tip="Keeps everything you already ticked and adds what the open quests imply">Apply – keep my ticks</button>
+      <button class="btn" data-act="active-apply" data-mode="strict" data-tip="Use this if you ticked EVERY quest in the task list of those traders: anything the tracker thinks is available for them but you did not tick is counted as finished">Apply – list is complete per trader</button>
+      <button class="btn btn-s" data-act="active-clear">Clear selection</button>
+    </div>
+    <div class="as-list">${groups || '<div class="empty small">No quest matches.</div>'}</div>`);
 }

@@ -133,7 +133,7 @@ details summary { cursor: pointer; color: var(--accent); font-family: var(--font
 .badge .ic { width: 12px; height: 12px; }
 .b-done { color: var(--ok); } .b-av { color: var(--warn); } .b-lock { color: var(--muted); }
 .b-kappa { color: var(--kappa); } .b-kappa-sub { color: var(--kappa); opacity: .7; border-style: dashed; }
-.b-event { color: var(--event); } .b-season { color: var(--season); } .b-lk { color: var(--lk); }
+.b-event { color: var(--event); } .b-active { color: var(--ok); border-style: double; } .b-season { color: var(--season); } .b-lk { color: var(--lk); }
 .b-fac, .b-ed, .b-choice, .b-muted { color: var(--muted); } .b-req { color: var(--accent); }
 .fir { display: inline-block; font-family: var(--font-h); font-weight: 700; font-size: 11px; letter-spacing: .04em; color: var(--bad); border: 1px solid var(--bad); padding: 0 4px; border-radius: 2px; line-height: 15px; vertical-align: 1px; }
 .c-red, .c-red a { color: var(--bad); } .c-green { color: var(--ok); } .c-orange { color: var(--warn); }
@@ -381,6 +381,17 @@ a.wl:hover { border-bottom-style: solid; }
 .ev-tag { font-family: var(--font-h); font-weight: 700; text-transform: uppercase; font-size: 12px; background: var(--event); color: #fff; padding: 1px 6px; border-radius: 2px; }
 .season .ev-tag { background: var(--season); }
 @media (max-width: 600px) { .ev-img { display: none; } }
+
+/* open-quest setup */
+.as-bar { display: flex; gap: 10px; align-items: center; margin: 8px 0; }
+.as-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.as-list { display: grid; gap: 6px; }
+.as-g .sub-h { display: flex; align-items: center; gap: 6px; }
+.as-row { display: flex; align-items: center; gap: 8px; padding: 3px 4px; border-radius: 2px; cursor: pointer; font-size: 14px; }
+.as-row:hover { background: var(--bg2); }
+.as-row.on { background: var(--ok-bg); }
+.as-row.is-done { opacity: .5; }
+.as-row input { accent-color: var(--ok); width: 16px; height: 16px; }
 
 /* speedrun */
 .raids { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; counter-reset: none; }

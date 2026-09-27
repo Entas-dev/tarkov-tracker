@@ -222,6 +222,7 @@ export const prereqsMet = (q, p = P()) => preOf(q).every(g => groupSatisfied(g, 
 
 export function questStatus(q, p = P()) {
   if (isDone(q.name, p)) return { s: 'done', reasons: [] };
+  if (p.active?.[q.name]) return { s: 'available', reasons: [], active: true }; // you told us it is open in your game
   if (q.alts?.length && q.alts.some(a => isDone(a, p))) return { s: 'blocked', reasons: [{ k: 'alt', v: q.alts.filter(a => isDone(a, p)) }] };
   const reasons = [];
   for (const g of preOf(q)) if (!groupSatisfied(g, p)) reasons.push({ k: 'pre', g });
@@ -294,10 +295,29 @@ export function tourStepsFor(names, p = P()) {
   return tour.objectives.slice(0, max + 1).filter(o => !o.optional && !p.chObj[`Tour|${o.id}`]).map(o => o.id);
 }
 
+// "These quests are open in my game" → everything they depend on is done
+export function applyActiveQuests(mode = 'merge') {
+  store.update(p => {
+    if (mode === 'replace' || mode === 'strict') { p.quests = {}; }
+    const act = Object.keys(p.active || {}).filter(n => D.quests[n]);
+    for (const n of act) delete p.quests[n];
+    const all = new Set();
+    for (const n of act) for (const m of prerequisiteClosure(n, p)) if (!p.active[m]) all.add(m);
+    for (const m of all) p.quests[m] = 1;
+    for (const id of tourStepsFor([...act, ...all], p)) p.chObj[`Tour|${id}`] = 1;
+    if (mode === 'strict') {
+      // the trader lists show every available quest: for traders you entered, anything available but not open is finished
+      const traders = new Set(act.map(n => D.quests[n].trader));
+      const avail = IX.order.filter(n => !p.quests[n] && !p.active[n] && traders.has(D.quests[n].trader) && visible(D.quests[n], p) && questStatus(D.quests[n], p).s === 'available');
+      for (const n of avail) p.quests[n] = 1;
+    }
+  }, 'progress');
+}
+
 export function completeQuest(name) {
   const add = prerequisiteClosure(name);
   const tourIds = tourStepsFor([name, ...add]);
-  store.update(p => { p.quests[name] = 1; for (const n of add) p.quests[n] = 1; for (const id of tourIds) p.chObj[`Tour|${id}`] = 1; });
+  store.update(p => { p.quests[name] = 1; for (const n of add) p.quests[n] = 1; for (const id of tourIds) p.chObj[`Tour|${id}`] = 1; if (p.active) { delete p.active[name]; for (const n of add) delete p.active[n]; } });
   return add.size;
 }
 
