@@ -1,5 +1,5 @@
 // Quest cards, objective lists, info drawer
-import { D, IX, P, visible, condStatus, traderUnlocked, questStatus, isDone, questNeeds, questObjProgress, objDone, cntKey, isSeasonal, preOf, traderLL } from './model.js';
+import { D, IX, P, visible, condStatus, traderUnlocked, questMapsUnlocked, questStatus, isDone, questNeeds, questObjProgress, objDone, cntKey, isSeasonal, preOf, traderLL } from './model.js';
 import { esc, attr, icon, img, traderImg, qlink, itemChip, statusBadge, wikiHref, wikiSectionHtml, fmt, progressBar } from './ui.js';
 
 export const expanded = new Set();
@@ -116,6 +116,7 @@ export function openQuestInfo(name) {
   const st = questStatus(q, p);
   const reqs = [];
   if (IX.tourGates?.[q.trader]) reqs.push(`${esc(q.trader)} unlocked through Tour step <b>${esc(IX.tourGates[q.trader].step)}</b> ${traderUnlocked(q.trader, p) ? '<span class="t-ok">✓</span>' : '<span class="muted">(not yet)</span>'}`);
+  { const ms = (q.maps || []).filter(Boolean); if (ms.length && ms.every(m => IX.mapGates?.[m])) { const first = ms.slice().sort((a, b) => IX.mapGates[a].idx - IX.mapGates[b].idx)[0]; reqs.push(`Access to ${esc(ms.join(' or '))} – Tour step <b>${esc(IX.mapGates[first].step)}</b> ${questMapsUnlocked(q, p) ? '<span class="t-ok">✓</span>' : '<span class="muted">(not yet)</span>'}`); } }
   if (q.minLevel) reqs.push(`PMC level ${q.minLevel}`);
   if (q.ll) reqs.push(`${esc(q.ll.trader)} loyalty level ${q.ll.level} <span class="muted">(yours: ${traderLL(q.ll.trader, p)})</span>`);
   const kapG = preOf(q).filter(g => g.every(a => a.kappa));

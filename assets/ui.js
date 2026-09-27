@@ -1,5 +1,5 @@
 // Shared UI helpers & components
-import { D, IX, P, questStatus, isDone, visible, traderLL, traderUnlocked, questNeeds, isSeasonal, preOf, groupSatisfied, questObjProgress } from './model.js';
+import { D, IX, P, questStatus, isDone, visible, traderLL, traderUnlocked, questMapsUnlocked, questNeeds, isSeasonal, preOf, groupSatisfied, questObjProgress } from './model.js';
 
 export const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 export const attr = esc;
@@ -78,6 +78,7 @@ export function questTooltip(name) {
   const rows = [];
   const ok = (b) => b ? `<span class="t-ok">${icon('check')}</span>` : `<span class="t-no">${icon('x')}</span>`;
   if (IX.tourGates?.[q.trader]) rows.push(`${ok(traderUnlocked(q.trader, p))} ${esc(q.trader)} unlocked <span class="muted">(Tour: ${esc(IX.tourGates[q.trader].step)})</span>`);
+  { const ms = (q.maps || []).filter(Boolean); if (ms.length && ms.every(m => IX.mapGates?.[m])) { const first = ms.slice().sort((a, b) => IX.mapGates[a].idx - IX.mapGates[b].idx)[0]; rows.push(`${ok(questMapsUnlocked(q, p))} Access to ${esc(ms.join(' or '))} <span class="muted">(Tour: ${esc(IX.mapGates[first].step)})</span>`); } }
   if (q.minLevel) rows.push(`${ok(p.settings.level >= q.minLevel)} PMC level ${q.minLevel}`);
   if (q.ll) rows.push(`${ok(traderLL(q.ll.trader, p) >= q.ll.level)} ${esc(q.ll.trader)} LL${q.ll.level}`);
   const kapG = preOf(q).filter(g => g.every(a => a.kappa));

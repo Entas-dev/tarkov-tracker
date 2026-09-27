@@ -183,6 +183,11 @@ export function parseQuest(title, wt, meta = {}) {
     alts: [],
   };
   if (q.choice) q.alts = links(ib.related).map(l => l.target).filter(t => t !== title);
+  const llInfobox = num(ib['ll requirement']);
+  if (llInfobox && llInfobox > 1) q.ll = { trader: giver, level: llInfobox };
+  if (llInfobox) q.llTier = llInfobox;
+  const llq = num(ib['ll quests']);
+  if (llq) q.llQuests = llq;
   const kr = plain(ib.reqkappa || '');
   q.kappa = /^yes/i.test(kr) ? 'yes' : /subsequent/i.test(kr) ? 'sub' : /^no/i.test(kr) ? 'no' : null;
 
@@ -305,27 +310,39 @@ export function parseStoryChapter(title, wt) {
   }
   ch.hasGuide = /==\s*Guide\s*==/i.test(wt);
   // Trader unlocks inside the chapter (Tour): guide steps like "[[Ragman]] - [[Interchange]]" with "Unlocks [[Skier]] as trader"
+  // Unlocks inside the chapter (Tour): guide steps like "[[Ragman]] - [[Interchange]]" with
+  // "Unlocks [[Skier]] as trader" / "Unlocks [[Customs]] in the location selection"
   ch.traderUnlocks = [];
+  ch.mapUnlocks = [];
   const guide = secs.find(s => s.level === 2 && s.titleText.toLowerCase() === 'guide');
   if (guide) {
     let from = 0;
+    const top = ch.objectives.map((o, i) => ({ o, i })).filter(x => (x.o.depth || 1) === 1);
     for (const s of secs.filter(x => x.level === 3 && x.start > guide.start && x.start < guide.start + guide.body.length + 10)) {
       const um = [...s.body.matchAll(/Unlocks\s+\[\[([^\]|]+)(?:\|[^\]]*)?\]\]\s+as\s+(?:a\s+)?trader/gi)].map(m => normTitle(m[1]));
-      const hl = links(s.title).map(l => l.target);
-      if (!um.length || !hl.length) continue;
-      const words = hl.map(h => h.toLowerCase());
-      const top = ch.objectives.map((o, i) => ({ o, i })).filter(x => (x.o.depth || 1) === 1 && x.i >= from);
-      const startI = top.findIndex(x => /^talk to /i.test(x.o.text) && x.o.text.toLowerCase().includes(words[0]));
-      if (startI < 0) continue;
-      let endI = startI;
-      for (let k = startI + 1; k < top.length; k++) {
-        const t = top[k].o.text.toLowerCase();
-        if (/^talk to /i.test(t) || !words.some(w => t.includes(w))) break;
-        endI = k;
+      const mm = [...s.body.matchAll(/Unlocks\s+\[\[([^\]|]+)(?:\|[^\]]*)?\]\]\s+in the location selection/gi)].map(m => normTitle(m[1]));
+      if (!um.length && !mm.length) continue;
+      const hl = links(s.title).map(l => l.target.toLowerCase());
+      const words = [...hl, ...mm.map(m => m.toLowerCase())];
+      const after = top.filter(x => x.i >= from);
+      // 1) "Ensure access to <Map>" objective
+      let endObj = null;
+      for (const m of mm) { const a = after.find(x => new RegExp('access to (the )?' + m.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i').test(x.o.text)); if (a) endObj = a; }
+      // 2) "Talk to <Trader>" … steps mentioning the trader/map
+      if (!endObj && hl.length) {
+        const startI = after.findIndex(x => /^talk to /i.test(x.o.text) && x.o.text.toLowerCase().includes(hl[0]));
+        if (startI >= 0) {
+          let endI = startI;
+          for (let k = startI + 1; k < after.length; k++) { const t = after[k].o.text.toLowerCase(); if (/^talk to /i.test(t) || !words.some(w => t.includes(w))) break; endI = k; }
+          endObj = after[endI];
+        }
       }
-      const unlockObj = top[endI].o.id;
-      from = top[endI].i + 1;
-      for (const tr of um) ch.traderUnlocks.push({ trader: tr, oid: unlockObj, step: plain(s.title) });
+      // 3) first objective mentioning the heading
+      if (!endObj) endObj = after.find(x => words.some(w => x.o.text.toLowerCase().includes(w))) || null;
+      if (!endObj) continue;
+      from = endObj.i + 1;
+      for (const tr of um) ch.traderUnlocks.push({ trader: tr, oid: endObj.o.id, step: plain(s.title) });
+      for (const m of mm) ch.mapUnlocks.push({ map: m, oid: endObj.o.id, step: plain(s.title) });
     }
   }
   return ch;

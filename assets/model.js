@@ -97,14 +97,23 @@ function buildIndexes() {
   const unlocked = Object.keys(IX.tourGates);
   const tOrder = unlocked.length ? [...TRADER_ORDER.filter(t => !unlocked.includes(t) && TRADER_ORDER.indexOf(t) < TRADER_ORDER.indexOf('Skier')), ...unlocked, ...TRADER_ORDER.filter(t => !unlocked.includes(t) && TRADER_ORDER.indexOf(t) > TRADER_ORDER.indexOf('Skier'))] : TRADER_ORDER;
   IX.traderOrder = tOrder;
-  const stageOf = (t) => IX.tourGates[t]?.stage || 0;
+  IX.mapGates = {};
+  for (const u of tour?.mapUnlocks || []) { const idx = tour.objectives.findIndex(o => o.id === u.oid); if (idx >= 0) IX.mapGates[u.map] = { oid: u.oid, idx, step: u.step }; }
+  // Tour objective index a quest waits for (trader unlock and/or access to one of its maps), -1 = none
+  const gateIdx = (q) => {
+    let g = IX.tourGates[q.trader]?.idx ?? -1;
+    const maps = (q.maps || []).filter(Boolean);
+    if (maps.length && maps.every(m => IX.mapGates[m])) g = Math.max(g, Math.min(...maps.map(m => IX.mapGates[m].idx)));
+    return g;
+  };
+  IX.gateIdx = (n) => gateIdx(Q[n]);
   // topological order (by normal graph); early quests follow the Tour unlock order of their trader, then level
   const indeg = {}; const out = {};
   for (const q of Object.values(Q)) { indeg[q.name] = 0; out[q.name] = []; }
   for (const q of Object.values(Q)) for (const g of q.pre) for (const a of g) { if (out[a.q]) { out[a.q].push(q.name); indeg[q.name]++; } }
   const effLevel = (q) => Math.max(q.minLevel || 0, (q.ll && D.traders[q.ll.trader]?.ll?.find(l => l.level === q.ll.level)?.pmcLevel) || 0);
   IX.effLevel = (n) => effLevel(Q[n]);
-  const key = (n) => { const q = Q[n]; const ti = tOrder.indexOf(q.trader); const st = stageOf(q.trader); return [Math.max(effLevel(q), st ? 1 + 2 * st : 0), st, effLevel(q), ti < 0 ? 99 : ti, n]; };
+  const key = (n) => { const q = Q[n]; const ti = tOrder.indexOf(q.trader); const g = gateIdx(q); return [Math.max(effLevel(q), g >= 0 ? 1 + g / 3 : 0), g, effLevel(q), ti < 0 ? 99 : ti, n]; };
   const cmp = (a, b) => { const A = key(a), B = key(b); for (let i = 0; i < A.length; i++) { if (A[i] < B[i]) return -1; if (A[i] > B[i]) return 1; } return 0; };
   let ready = Object.keys(indeg).filter(n => indeg[n] === 0).sort(cmp);
   const order = [];
@@ -210,6 +219,7 @@ export function questStatus(q, p = P()) {
   if (q.minLevel && p.settings.level < q.minLevel) reasons.push({ k: 'level', v: q.minLevel });
   if (q.ll && q.ll.trader && traderLL(q.ll.trader, p) < q.ll.level) reasons.push({ k: 'll', v: q.ll });
   if (!traderUnlocked(q.trader, p)) reasons.push({ k: 'tour', trader: q.trader, step: IX.tourGates[q.trader].step });
+  if (!questMapsUnlocked(q, p)) reasons.push({ k: 'map', maps: q.maps });
   return { s: reasons.length ? 'locked' : 'available', reasons };
 }
 
@@ -242,12 +252,29 @@ export function traderUnlocked(trader, p = P()) {
   if (!g) return true;
   return !!p.ch['Tour'] || !!p.chObj[`Tour|${g.oid}`];
 }
-// Tour objectives that must be done to have unlocked the traders of these quests
+export function mapUnlocked(map, p = P()) {
+  const g = IX.mapGates?.[map];
+  if (!g) return true;
+  return !!p.ch['Tour'] || !!p.chObj[`Tour|${g.oid}`];
+}
+// a quest on several maps is possible as soon as one of them is accessible
+export function questMapsUnlocked(q, p = P()) {
+  const maps = (q.maps || []).filter(Boolean);
+  if (!maps.length) return true;
+  return maps.some(m => mapUnlocked(m, p));
+}
+// Tour objectives that must be done to have unlocked the traders / maps of these quests
 export function tourStepsFor(names, p = P()) {
   const tour = D.chapters?.['Tour'];
   if (!tour || p.ch['Tour']) return [];
   let max = -1;
-  for (const n of names) { const t = D.quests[n]?.trader; const g = IX.tourGates?.[t]; if (g && !traderUnlocked(t, p)) max = Math.max(max, g.idx); }
+  for (const n of names) {
+    const q = D.quests[n];
+    if (!q) continue;
+    const g = IX.tourGates?.[q.trader];
+    if (g && !traderUnlocked(q.trader, p)) max = Math.max(max, g.idx);
+    if (!questMapsUnlocked(q, p)) { const idxs = q.maps.map(m => IX.mapGates[m]?.idx).filter(i => i != null); if (idxs.length) max = Math.max(max, Math.min(...idxs)); }
+  }
   if (max < 0) return [];
   return tour.objectives.slice(0, max + 1).filter(o => !o.optional && !p.chObj[`Tour|${o.id}`]).map(o => o.id);
 }
