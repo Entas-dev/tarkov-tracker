@@ -573,7 +573,7 @@ a.wl:hover { border-bottom-style: solid; }
 .brand { font-size: 22px; letter-spacing: .12em; }
 .brand-ic { color: var(--head); fill: none; }
 .tabs { gap: 4px; padding: 6px 12px 8px; }
-.tab { font-size: 16px; font-weight: 700; letter-spacing: .06em; padding: 6px 14px 5px; color: var(--muted); background: color-mix(in srgb, var(--panel) 85%, transparent); border: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.tab { font-size: 15px; font-weight: 700; letter-spacing: .05em; padding: 6px 11px 5px; color: var(--muted); background: color-mix(in srgb, var(--panel) 85%, transparent); border: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .tab:hover { color: var(--head); border-color: var(--line2); background: var(--panel2); }
 .tab.on { color: var(--sel-ink); background: var(--sel-bg); border-color: var(--sel-bg); }
 .tab.on .tab-n { color: inherit; opacity: .7; }
@@ -639,7 +639,7 @@ input[type=number], input[type=search], select { background: var(--bg2); border-
 .ts-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; padding: 8px 12px; background: var(--bar); color: var(--bar-ink); }
 .ts-cb { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font: 600 17px var(--font-h); white-space: nowrap; }
 .ts-cb input { position: absolute; opacity: 0; width: 1px; height: 1px; }
-.ts-box { width: 22px; height: 22px; display: grid; place-items: center; border: 2px solid currentColor; color: transparent; flex: none; }
+.ts-box { width: 22px; height: 22px; display: grid; place-items: center; border: 2px solid var(--bar-ink); color: transparent; flex: none; }
 .ts-box .ic { width: 16px; height: 16px; stroke-width: 3; }
 .ts-cb input:checked + .ts-box { color: var(--bar-ink); }
 .ts-cb input:focus-visible + .ts-box { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -654,6 +654,7 @@ input[type=number], input[type=search], select { background: var(--bg2); border-
 .ts-list { padding: 0 0 10px; border-right: 1px solid var(--line); }
 .ts-grp + .ts-grp { margin-top: 4px; }
 .ts-gh { position: sticky; top: 0; z-index: 2; width: 100%; display: flex; align-items: center; gap: 10px; padding: 9px 12px; background: var(--gh-bg); color: var(--gh-ink); border: 0; border-bottom: 1px solid var(--gh-line); cursor: pointer; font: 700 18px var(--font-h); text-transform: uppercase; letter-spacing: .05em; text-align: left; }
+.ts-roman .ic { width: 16px; height: 16px; }
 .ts-roman { display: grid; place-items: center; min-width: 26px; height: 26px; padding: 0 3px; background: var(--gh-ink); color: #111; font: 700 15px/1 var(--font-h); clip-path: polygon(0 0, 100% 0, 100% 72%, 72% 100%, 0 100%); }
 .ts-gimg { width: 28px; height: 28px; object-fit: cover; object-position: 50% 12%; }
 .ts-gl { flex: 1; min-width: 0; }

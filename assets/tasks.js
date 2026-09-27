@@ -5,6 +5,9 @@ import { esc, attr, icon, img, traderImg, qlink, itemChip, fmt } from './ui.js';
 import { objectiveRows, needsBlock, questBadges } from './components.js';
 
 const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V'];
+// quests without a loyalty level unlock through task chains / the story, not through a trader LL (patch 1.1)
+const llGroup = (q) => (q.ll?.level ? `LL${q.ll.level}` : 'chain');
+const CHAIN_SVG = '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M9.5 14.5l5-5"/><path d="M7.5 11.5l-2 2a3.5 3.5 0 005 5l2-2"/><path d="M16.5 12.5l2-2a3.5 3.5 0 00-5-5l-2 2"/></svg>';
 
 // ---------- task type (the icon in front of every task, like in the game) ----------
 const hasKids = (q, o) => q.objectives.some(x => x.parent === o.id);
@@ -45,7 +48,8 @@ function lockHint(q, st, p) {
   if (r.k === 'll') return `${ROMAN[r.v.level] ? 'LL' + r.v.level : ''}`;
   if (r.k === 'var') return `group ${r.x.group + 1}`;
   if (r.k === 'tour' || r.k === 'start') return 'Tour';
-  if (r.k === 'map') return 'map';
+  if (r.k === 'map') return (r.maps || [])[0] || 'map';
+  if (r.k === 'pre') { const a = r.g?.[0]; return a ? `after ${a.q.length > 22 ? a.q.slice(0, 21) + '…' : a.q}` : ''; }
   if (r.k === 'chapter') return r.c.ch;
   return '';
 }
@@ -74,23 +78,24 @@ export function taskScreen({ id, names, group = 'll', showKappaToggle = true }) 
   // groups
   const groups = new Map();
   for (const r of rows) {
-    const g = group === 'trader' ? (r.Q.trader || 'Other') : `LL${r.Q.ll?.level || 1}`;
+    const g = group === 'trader' ? (r.Q.trader || 'Other') : llGroup(r.Q);
     if (!groups.has(g)) groups.set(g, []);
     groups.get(g).push(r);
   }
   let keys = [...groups.keys()];
-  if (group === 'll') keys.sort();
+  if (group === 'll') keys.sort((a, b) => (a === 'chain') - (b === 'chain') || a.localeCompare(b));
   else keys.sort((a, b) => (IX.traders.indexOf(a) + 1 || 99) - (IX.traders.indexOf(b) + 1 || 99));
   // selection: keep it if still listed, otherwise the first available task
   let sel = rows.find(r => r.n === s.sel) ? s.sel : (rows.find(r => r.st.s === 'available') || rows[0])?.n || '';
   const selQ = sel ? D.quests[sel] : null;
   const total = (n) => n.filter(x => visible(D.quests[x], p));
   const grpHead = (g, list) => {
-    const all = group === 'trader' ? total(IX.byTrader[g] || []) : total(names.filter(n => `LL${D.quests[n]?.ll?.level || 1}` === g));
+    const all = group === 'trader' ? total(IX.byTrader[g] || []) : total(names.filter(n => D.quests[n] && llGroup(D.quests[n]) === g));
     const dn = all.filter(n => isDone(n, p)).length;
     const col = !!s.col[g];
-    const badge = group === 'trader' ? traderImg(g, 'ts-gimg') : `<span class="ts-roman">${ROMAN[+g.slice(2)] || g.slice(2)}</span>`;
-    const label = group === 'trader' ? esc(g) : `Loyalty level ${esc(g.slice(2))}`;
+    const chain = g === 'chain';
+    const badge = group === 'trader' ? traderImg(g, 'ts-gimg') : `<span class="ts-roman">${chain ? CHAIN_SVG : ROMAN[+g.slice(2)] || g.slice(2)}</span>`;
+    const label = group === 'trader' ? esc(g) : chain ? 'Task chains &amp; story' : `Loyalty level ${esc(g.slice(2))}`;
     return `<button class="ts-gh" data-act="ts-grp" data-id="${id}" data-g="${attr(g)}" aria-expanded="${!col}">${badge}<span class="ts-gl">${label}</span><span class="ts-gc">${dn}/${all.length}</span><span class="ts-chev ${col ? 'col' : ''}">${icon('chevron')}</span></button>`;
   };
   const row = (r) => {
@@ -169,7 +174,7 @@ export function taskDetail(q, id = '') {
       ${q.allMaps.length ? `<button class="btn" data-act="map" data-map="${attr(q.allMaps[0])}" data-focus="${attr(q.name)}">${icon('map')} Map</button>` : ''}
       <button class="btn" data-act="info" data-q="${attr(q.name)}" data-tip="Guide, locations and pictures from the wiki">${icon('info')} Guide</button>
     </div>
-    <div class="td-badges">${questBadges(q)}</div>
+    <div class="td-badges">${questBadges(q).replace(/<span class="badge b-active"[^>]*>Active<\/span>/, '')}</div>
     ${isSeasonal() && q.seasonal?.length ? `<div class="seasonal-box">${icon('flag')}<div>${q.seasonal.map(s => `<div>${s.html}</div>`).join('')}</div></div>` : ''}
     ${req.length ? `<section class="td-sec"><h3>Requirements</h3><div class="td-req">${req.map(r => `<div class="tt-req">${r.replace(/^(<span class="t-(?:ok|no|dot)">[\s\S]*?<\/span>)\s*([\s\S]*)$/, '$1<span>$2</span>')}</div>`).join('')}</div></section>` : ''}
     <section class="td-sec"><h3>Objectives <span class="muted">${pr.done}/${pr.total}</span></h3>${objectiveRows(q)}</section>
