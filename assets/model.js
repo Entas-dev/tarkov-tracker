@@ -402,10 +402,31 @@ export function applyActiveQuests(mode = 'merge') {
 }
 
 export function completeQuest(name) {
-  const add = prerequisiteClosure(name);
-  const tourIds = tourStepsFor([name, ...add]);
-  store.update(p => { p.quests[name] = 1; for (const n of add) p.quests[n] = 1; for (const id of tourIds) p.chObj[`Tour|${id}`] = 1; if (p.active) { delete p.active[name]; for (const n of add) delete p.active[n]; } });
-  return add.size;
+  const p0 = P();
+  const add = [...prerequisiteClosure(name)].filter(n => !p0.quests[n]);
+  const tourIds = tourStepsFor([name, ...add]).filter(id => !p0.chObj[`Tour|${id}`]);
+  store.update(p => {
+    p.autoBy = p.autoBy || {};
+    p.quests[name] = 1; delete p.autoBy[name];
+    for (const n of add) { p.quests[n] = 1; p.autoBy[n] = name; }
+    for (const id of tourIds) { p.chObj[`Tour|${id}`] = 1; p.autoBy[`Tour|${id}`] = name; }
+    if (p.active) { delete p.active[name]; for (const n of add) delete p.active[n]; }
+  }, 'progress', add.length ? `${name} done (+${add.length} earlier quest${add.length > 1 ? 's' : ''} auto-checked)` : `${name} done`);
+  return add.length;
+}
+
+// quests (and Tour steps) that were checked automatically when `name` was ticked and are not needed by anything else still done
+export function autoChecked(name, p = P()) {
+  const auto = Object.entries(p.autoBy || {}).filter(([k, v]) => v === name).map(([k]) => k);
+  const quests = auto.filter(k => D.quests[k] && isDone(k, p));
+  const tour = auto.filter(k => k.startsWith('Tour|') && p.chObj[k]);
+  const drop = new Set([name, ...quests]);
+  const keep = new Set();
+  for (const n of Object.keys(p.quests)) {
+    if (drop.has(n) || !D.quests[n]) continue;
+    for (const m of prerequisiteClosure(n, p)) if (drop.has(m)) keep.add(m);
+  }
+  return { quests: quests.filter(k => !keep.has(k)), tour };
 }
 
 // dependents that would become invalid if `names` are un-done
@@ -426,12 +447,11 @@ export function doneDependents(name, p = P()) {
   return out.sort((a, b) => IX.rank[a] - IX.rank[b]);
 }
 
-export function uncompleteQuests(names) {
+export function uncompleteQuests(names, { tour = [], label = null } = {}) {
   store.update(p => {
-    for (const n of names) {
-      delete p.quests[n];
-    }
-  });
+    for (const n of names) { delete p.quests[n]; if (p.autoBy) delete p.autoBy[n]; }
+    for (const k of tour) { delete p.chObj[k]; if (p.autoBy) delete p.autoBy[k]; }
+  }, 'progress', label || (names.length > 1 ? `${names[0]} unchecked (+${names.length - 1})` : `${names[0]} unchecked`));
 }
 
 // objectives
@@ -582,4 +602,108 @@ export function shoppingList({ scope = 'all', includeCurrency = false, includeQu
     }
   }
   return Object.values(agg).filter(a => a.need > a.have).sort((a, b) => (b.need - b.have) - (a.need - a.have));
+}
+
+// ---------- items for any combination of goals (Needed Items tab) ----------
+// chapters you need for your ending: The Ticket, its prerequisites and the chapters its objectives point to
+export function requiredChapters(ending = P().settings.ending || 'Savior', p = P()) {
+  const req = new Set(['The Ticket', ...chapterClosure('The Ticket')]);
+  const t = D.chapters?.['The Ticket'];
+  if (t) for (const o of t.objectives) if (!o.endings || o.endings.includes(ending)) for (const m of (o.html + (o.cond || '')).matchAll(/data-t="([^"]+)"/g)) if (D.chapters[m[1]]) { req.add(m[1]); for (const d of chapterClosure(m[1])) req.add(d); }
+  return req;
+}
+// hideout levels the story needs ("Obtain Intelligence Center level 1" …), with the modules those levels require
+export function storyHideout(ending = P().settings.ending || 'Savior', p = P()) {
+  const mods = D.hideout.modules.map(m => m.name).sort((a, b) => b.length - a.length);
+  const re = new RegExp(`(${mods.map(m => m.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\s*(?:level|L)\\s*(\\d)`, 'i');
+  const want = {};
+  for (const cn of requiredChapters(ending, p)) {
+    const c = D.chapters[cn];
+    if (!c || p.ch[cn]) continue;
+    for (const o of c.objectives) {
+      if (o.endings && !o.endings.includes(ending)) continue;
+      if (condStatus(o.cond, p) === false || p.chObj[`${cn}|${o.id}`]) continue;
+      const m = (o.text || '').match(re);
+      if (!m) continue;
+      const mod = mods.find(x => x.toLowerCase() === m[1].toLowerCase());
+      for (const [k, lv] of Object.entries(hideoutClosure(mod, +m[2]))) want[k] = Math.max(want[k] || 0, lv);
+    }
+  }
+  return want; // {module: level}
+}
+
+// sel: {story, kappa, quests, hideout}. Returns [{item, need, have, fir, prio, sources:[…]}] sorted by priority.
+export function neededItems(sel, { includeCurrency = false, includeQuestItems = false, includeOptional = false } = {}, p = P()) {
+  const agg = {};
+  const add = (item, count, have, fir, prio, src) => {
+    const I = D.items[item];
+    if (!I) return;
+    if (I.currency && !includeCurrency) return;
+    if (I.questItem && !includeQuestItems) return;
+    const a = agg[item] || (agg[item] = { item, need: 0, have: 0, fir: 0, prio: 0, order: 1e9, sources: [] });
+    const h = Math.min(have, count);
+    a.need += count; a.have += h; if (fir) a.fir += count - h;
+    if (count > h) { a.prio = Math.max(a.prio, prio); a.order = Math.min(a.order, src.order ?? 1e9); }
+    a.sources.push({ ...src, count, have: h, fir, prio });
+  };
+  // quests
+  const qset = new Set();
+  if (sel.quests) for (const n of IX.order) qset.add(n);
+  if (sel.kappa) for (const n of IX.kappa) qset.add(n);
+  IX.order.forEach((n, i) => {
+    if (!qset.has(n)) return;
+    const q = D.quests[n];
+    if (!visible(q, p) || isDone(n, p) || q.alts?.some(a => isDone(a, p))) return;
+    const st = questStatus(q, p);
+    const prio = st.s === 'available' ? (p.active?.[n] ? 4 : 3) : 1;
+    for (const x of questNeeds(q, p, { includeOptional })) add(x.item, x.count, x.have, x.fir, prio, { type: 'quest', name: n, key: cntKey(n, x.item), order: i });
+  });
+  // story chapters
+  const ending = p.settings.ending || 'Savior';
+  if (sel.story) {
+    const req = requiredChapters(ending, p);
+    IX.chapterOrder.forEach((cn, i) => {
+      const c = D.chapters[cn];
+      if (!c || chDone(cn, p) || (!req.has(cn) && !sel.sideStory)) return;
+      for (const x of c.needs || []) {
+        if (x.optional && !includeOptional) continue;
+        const o = c.objectives.find(o => x.objectives.includes(o.id));
+        if (o && !objApplies(o, p)) continue;
+        const k = `ch:${cn}|${x.item}`;
+        add(x.item, x.count, p.cnt[k] || 0, x.fir, 2, { type: 'chapter', name: cn, key: k, order: 5000 + i });
+      }
+    });
+  }
+  // hideout: everything not built, or only what the story needs
+  const storyH = sel.story ? storyHideout(ending, p) : {};
+  for (const m of D.hideout.modules) {
+    const built = hLevel(m.name, p);
+    for (const L of m.levels) {
+      if (L.level <= built) continue;
+      const forStory = (storyH[m.name] || 0) >= L.level;
+      if (!sel.hideout && !forStory) continue;
+      const next = L.level === built + 1 && levelReqStatus(m.name, L.level, p).ok;
+      const prio = forStory ? (next ? 3 : 2) : next ? 2 : 1;
+      for (const i of L.items) {
+        if (i.optional && !includeOptional) continue;
+        const k = hcntKey(m.name, L.level, i.item);
+        add(i.item, i.count, p.hcnt[k] || 0, i.fir && !isSeasonal(), prio, { type: 'hideout', name: m.name, level: L.level, key: k, story: forStory, order: 8000 + L.level * 100 });
+      }
+    }
+  }
+  return Object.values(agg).filter(a => a.need > 0).sort((a, b) => ((b.need > b.have) - (a.need > a.have)) || b.prio - a.prio || a.order - b.order || (b.need - b.have) - (a.need - a.have));
+}
+
+// "I have n of this item" → spread over the sources, most urgent first
+export function setItemHave(entry, n) {
+  const srcs = entry.sources.slice().sort((a, b) => b.prio - a.prio || (a.order ?? 0) - (b.order ?? 0));
+  store.update(p => {
+    let left = Math.max(0, n);
+    for (const s of srcs) {
+      const v = Math.min(left, s.count);
+      left -= v;
+      const bucket = s.type === 'hideout' ? p.hcnt : p.cnt;
+      if (v) bucket[s.key] = v; else delete bucket[s.key];
+    }
+  }, 'progress', `${entry.item}: have ${n}/${entry.need}`);
 }

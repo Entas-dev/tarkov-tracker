@@ -258,6 +258,7 @@ function chapterDetail(c, required, ending) {
       <button class="btn ${done ? '' : 'btn-p'}" data-act="chapter" data-c="${attr(c.name)}">${icon('check')} ${done ? 'Mark not done' : 'Complete chapter'}</button>
       ${c.maps?.length ? `<button class="btn" data-act="map" data-map="${attr(c.maps[0])}">${icon('map')} Map</button>` : ''}
       <button class="btn" data-act="info-ch" data-c="${attr(c.name)}">${icon('info')} Guide</button>
+      ${!done && (c.reqHtml || []).some(r => /data-t="(Customs|Woods|Shoreline|Interchange|Reserve|Lighthouse|Streets of Tarkov|Factory|Ground Zero|The Lab|Icebreaker|The Labyrinth)"/.test(r)) ? `<button class="btn ${p.chStart?.[c.name] ? 'on' : ''}" data-act="ch-start" data-c="${attr(c.name)}" data-tip="The storyline starts when you pick up its note / visit its spot in raid">${p.chStart?.[c.name] ? 'Storyline started ✓' : 'Mark storyline as started'}</button>` : ''}
     </div>
     ${c.descHtml ? `<section class="td-sec"><blockquote>${c.descHtml}</blockquote></section>` : ''}
     ${c.reqHtml?.length ? `<section class="td-sec"><h3>Unlock</h3><div class="td-req">${c.reqHtml.map(r => `<div>${r}</div>`).join('')}</div></section>` : ''}

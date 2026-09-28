@@ -1,6 +1,6 @@
 // Hideout, Prestige, BattlePass, Achievements, Items tabs
 import { store } from './store.js';
-import { D, IX, P, hLevel, moduleMax, levelReqStatus, hcntKey, isSeasonal, isPvE, isDone, chDone, traderLL, shoppingList, questStatus } from './model.js';
+import { D, IX, P, hLevel, moduleMax, levelReqStatus, hcntKey, isSeasonal, isPvE, isDone, chDone, traderLL, shoppingList, questStatus, neededItems } from './model.js';
 import { esc, attr, icon, img, qlink, itemChip, progressBar, fmt, statusBadge, traderImg } from './ui.js';
 import { expanded } from './components.js';
 import { skillReqStatus, perksNotesHtml } from './perks.js';
@@ -20,6 +20,9 @@ export function renderHideout(root) {
   <div class="tab-head"><div><h1>Hideout</h1><p class="lede">Click a level pip to set what you have built; lower levels and required modules are set automatically.${isSeasonal() ? ' <b>Seasonal:</b> no hideout items need to be found in raid.' : ''}</p></div>
     <div class="head-stat">${progressBar(builtLv, totalLv, 'Module levels')}</div></div>
   ${perksNotesHtml('hideout')}
+  <section class="panel hchk"><div class="panel-h"><h2>Checklist</h2><span class="small muted">Tick every level you have built. Required lower levels and modules are ticked automatically; built levels drop out of Needed Items.</span></div>
+    <div class="hchk-grid">${mods.map(m => { const lv = hLevel(m.name, p); return `<div class="hchk-row ${lv >= m.levels.length ? 'max' : ''}">${img(m.img, '', 'hchk-ic')}<span class="hchk-n">${esc(m.name)}</span><span class="hchk-bx">${m.levels.map(L => { const on = L.level <= lv; const rdy = !on && L.level === lv + 1 && levelReqStatus(m.name, L.level, p).ok; return `<button class="hchk-b ${on ? 'on' : ''} ${rdy ? 'rdy' : ''}" data-act="hcheck" data-m="${attr(m.name)}" data-l="${L.level}" aria-pressed="${on}" aria-label="${attr(m.name)} level ${L.level}" data-tip="${attr(`${m.name} level ${L.level}${on ? ' – built (click to unbuild)' : rdy ? ' – can be built now' : ''}`)}">${on ? icon('check') : L.level}</button>`; }).join('')}</span></div>`; }).join('')}</div>
+  </section>
   <div class="filters"><div class="seg" role="radiogroup" aria-label="Filter">${[['all', 'All modules'], ['open', 'Not maxed'], ['ready', 'Next level unlockable']].map(([v, l]) => `<button role="radio" aria-checked="${f === v}" class="seg-b ${f === v ? 'on' : ''}" data-act="hf" data-v="${v}">${l}</button>`).join('')}</div></div>
   <div class="hgrid">${list.map(m => moduleCard(m)).join('')}</div>`;
 }
@@ -141,33 +144,90 @@ export function renderAchievements(root) {
 }
 
 // ---------------- ITEMS (shopping list) ----------------
+// ---------------- NEEDED ITEMS ----------------
+const IDEF = { story: true, kappa: false, quests: true, hideout: true, currency: false, questItems: false, optional: false, q: '', view: 'grid', showDone: false };
+export const itemFilter = () => ({ ...IDEF, ...(ui().if2 || {}) });
+export function itemList() {
+  const f = itemFilter();
+  return neededItems({ story: f.story, kappa: f.kappa, quests: f.quests, hideout: f.hideout }, { includeCurrency: f.currency, includeQuestItems: f.questItems, includeOptional: f.optional });
+}
+const PRIO = [[3, 'Needed now', 'open quests you can do now and the next hideout level you can build'], [2, 'Next up', 'story, next hideout levels once their requirements are met'], [1, 'Later', 'locked quests and later hideout levels']];
+const srcLabel = (s) => (s.type === 'hideout' ? `${s.name} L${s.level}${s.story ? ' (story)' : ''}` : s.name);
+
 export function renderItems(root) {
-  const f = ui().if || { scope: 'all', currency: false, questItems: false, optional: false, q: '' };
-  const list = shoppingList({ scope: f.scope, includeCurrency: f.currency, includeQuestItems: f.questItems, includeOptional: f.optional });
+  const f = itemFilter();
+  const all = itemList();
   const q = (f.q || '').toLowerCase();
-  const shown = list.filter(a => !q || a.item.toLowerCase().includes(q));
-  const firTotal = shown.reduce((s, a) => s + a.fir, 0);
-  const lim = ui().iLim || 150;
+  const shown = all.filter(a => !q || a.item.toLowerCase().includes(q) || a.sources.some(s => s.name.toLowerCase().includes(q)));
+  const open = shown.filter(a => a.need > a.have);
+  const done = shown.filter(a => a.need <= a.have);
+  const firTotal = open.reduce((s, a) => s + a.fir, 0);
   const ld = lootData();
   if (!ld && lootState() === 'idle') ensureLoot();
   const where = (item) => { if (!ld) return ''; const bm = bestMaps(itemIndex(item)).slice(0, 3); return bm.length ? `<div class="i-where small muted">Best maps: ${bm.map(b => esc(mapDisplayName(b.key))).join(', ')}</div>` : ''; };
-  root.innerHTML = `
-  <div class="tab-head"><div><h1>Needed Items</h1><p class="lede">Everything you still need across unfinished quests, story and hideout. Don't sell these.</p></div>
-    <div class="head-stat"><div class="stat"><b>${shown.length}</b> different items · <b>${fmt(shown.reduce((s, a) => s + a.need - a.have, 0))}</b> pieces · <b class="c-red">${fmt(firTotal)}</b> must be FiR</div></div></div>
-  ${perksNotesHtml('items')}
-  <div class="filters">
-    <div class="seg" role="radiogroup" aria-label="Scope">${[['all', 'Everything'], ['kappa', 'Kappa quests'], ['hideout', 'Hideout'], ['story', 'Story']].map(([v, l]) => `<button role="radio" aria-checked="${f.scope === v}" class="seg-b ${f.scope === v ? 'on' : ''}" data-act="iscope" data-v="${v}">${l}</button>`).join('')}</div>
-    <label class="search">${icon('search')}<input type="search" placeholder="Search items" value="${attr(f.q || '')}" data-if="q" aria-label="Search items"></label>
-    <label class="tog"><input type="checkbox" data-if="currency" ${f.currency ? 'checked' : ''}> Money</label>
-    <label class="tog"><input type="checkbox" data-if="questItems" ${f.questItems ? 'checked' : ''}> Quest-only items</label>
-    <label class="tog"><input type="checkbox" data-if="optional" ${f.optional ? 'checked' : ''}> Optional objectives</label>
-  </div>
-  <div class="ilist">${shown.slice(0, lim).map(a => { const I = D.items[a.item] || {}; const miss = a.need - a.have; return `<div class="irow">
+  const tog = (k, l, tip) => `<button class="seg-b ${f[k] ? 'on' : ''}" data-act="ifx" data-k="${k}" aria-pressed="${!!f[k]}" data-tip="${attr(tip)}">${l}</button>`;
+  const tile = (a) => {
+    const I = D.items[a.item] || {};
+    const miss = Math.max(0, a.need - a.have);
+    const sel = ui().ipop === a.item;
+    return `<button class="ig-t p${Math.min(a.prio, 3)} ${miss ? '' : 'got'} ${sel ? 'sel' : ''}" data-act="it-tap" data-item="${attr(a.item)}" data-tip-item="${attr(a.item)}" aria-label="${attr(`${a.item}: ${a.have} of ${a.need}`)}">
+      ${img(I.img, a.item, 'ig-img')}${a.fir && miss ? '<span class="ig-fir">FiR</span>' : ''}${a.prio >= 4 ? '<span class="ig-act" title="for a quest you have open">!</span>' : ''}
+      <span class="ig-n">${miss ? fmt(miss) : icon('check')}</span>${a.have && miss ? `<span class="ig-have">${fmt(a.have)}/${fmt(a.need)}</span>` : ''}</button>`;
+  };
+  const row = (a) => { const I = D.items[a.item] || {}; const miss = a.need - a.have; return `<div class="irow p${Math.min(a.prio, 3)}">
     ${img(I.img, a.item, 'i-ic')}
     <div class="i-main"><div class="i-name"><span class="chip-name" data-item="${attr(a.item)}" data-tip-item="${attr(a.item)}">${esc(a.item)}</span></div>
-      <div class="i-src small">${a.sources.slice(0, 6).map(s => `<span class="src">${s.type === 'hideout' ? `${esc(s.name)} L${s.level}` : s.type === 'chapter' ? `<a class="wl" data-t="${attr(s.name)}">${esc(s.name)}</a>` : qlink(s.name)} ×${fmt(s.count - (s.have || 0))}${s.fir ? ' <span class="fir">FiR</span>' : ''}</span>`).join('')}${a.sources.length > 6 ? `<span class="muted">+${a.sources.length - 6} more</span>` : ''}</div>${where(a.item)}</div>
-    <div class="i-num"><b>${fmt(miss)}</b>${a.fir ? `<span class="fir">${fmt(a.fir)} FiR</span>` : ''}</div>
+      <div class="i-src small">${a.sources.filter(s => s.count > s.have).slice(0, 6).map(s => `<span class="src">${s.type === 'hideout' ? esc(srcLabel(s)) : s.type === 'chapter' ? `<a class="wl" data-t="${attr(s.name)}">${esc(s.name)}</a>` : qlink(s.name)} ×${fmt(s.count - s.have)}${s.fir ? ' <span class="fir">FiR</span>' : ''}</span>`).join('')}</div>${where(a.item)}</div>
+    <div class="i-num"><b>${fmt(Math.max(0, miss))}</b>${a.fir ? `<span class="fir">${fmt(a.fir)} FiR</span>` : ''}</div>
+    <button class="btn btn-s" data-act="it-tap" data-item="${attr(a.item)}">Have</button>
     <button class="ibtn" data-act="info-item" data-item="${attr(a.item)}" aria-label="Where to find">${icon('info')}</button>
-  </div>`; }).join('') || '<div class="empty">Nothing left to collect for this scope.</div>'}</div>
-  ${shown.length > lim ? `<button class="btn more" data-act="more" data-k="iLim">Show more (${shown.length - lim} hidden)</button>` : ''}`;
+  </div>`; };
+  const pop = ui().ipop ? all.find(a => a.item === ui().ipop) : null;
+  const section = ([pr, title, hint]) => {
+    const list = open.filter(a => Math.min(a.prio, 3) === pr);
+    if (!list.length) return '';
+    return `<section class="ig-sec"><h2 class="ig-h">${title} <span class="muted small">${list.length} items · ${hint}</span></h2>
+      ${f.view === 'list' ? `<div class="ilist">${list.map(row).join('')}</div>` : `<div class="ig-grid">${list.map(tile).join('')}</div>`}</section>`;
+  };
+  root.innerHTML = `
+  <div class="tab-head"><div><h1>Needed Items</h1><p class="lede">Everything you still need for the goals you pick. Click an item to tick it (or set how many you have) – most urgent first.</p></div>
+    <div class="head-stat"><div class="stat"><b>${open.length}</b> items · <b>${fmt(open.reduce((s, a) => s + a.need - a.have, 0))}</b> pieces · <b class="c-red">${fmt(firTotal)}</b> must be FiR</div></div></div>
+  ${perksNotesHtml('items')}
+  <div class="filters">
+    <span class="small muted">For</span>
+    <div class="seg multi" role="group" aria-label="Goals">
+      ${tog('story', 'Story', 'Chapters you need for your ending – including the hideout levels the story requires')}
+      ${tog('kappa', 'Kappa', 'All Kappa-required quests incl. Collector')}
+      ${tog('quests', 'All quests', 'Every unfinished quest')}
+      ${tog('hideout', 'Hideout', 'Every hideout level you have not built')}
+      <button class="seg-b" data-act="ifall" data-tip="Story + all quests + hideout">All</button>
+    </div>
+    <label class="search">${icon('search')}<input type="search" placeholder="Search items or quests" value="${attr(f.q || '')}" data-if2="q" aria-label="Search items"></label>
+    <div class="seg" role="radiogroup" aria-label="View"><button class="seg-b ${f.view !== 'list' ? 'on' : ''}" data-act="ifv" data-v="grid">Icons</button><button class="seg-b ${f.view === 'list' ? 'on' : ''}" data-act="ifv" data-v="list">List</button></div>
+    <label class="tog"><input type="checkbox" data-if2="currency" ${f.currency ? 'checked' : ''}> Money</label>
+    <label class="tog"><input type="checkbox" data-if2="questItems" ${f.questItems ? 'checked' : ''}> Quest items</label>
+    <label class="tog"><input type="checkbox" data-if2="optional" ${f.optional ? 'checked' : ''}> Optional</label>
+  </div>
+  ${!f.story && !f.kappa && !f.quests && !f.hideout ? '<div class="empty">Pick at least one goal above.</div>' : ''}
+  ${PRIO.map(section).join('') || (f.story || f.kappa || f.quests || f.hideout ? '<div class="empty">Nothing left to collect for these goals.</div>' : '')}
+  ${done.length ? `<section class="ig-sec"><h2 class="ig-h"><button class="linkbtn" data-act="ifx" data-k="showDone">${f.showDone ? 'Hide' : 'Show'} collected (${done.length})</button></h2>${f.showDone ? `<div class="ig-grid">${done.map(tile).join('')}</div>` : ''}</section>` : ''}
+  ${pop ? itemPop(pop) : ''}`;
+}
+
+function itemPop(a) {
+  const I = D.items[a.item] || {};
+  const open = a.sources.filter(s => s.count > 0);
+  return `<div class="ipop" role="dialog" aria-label="${attr(a.item)}">
+    <div class="ipop-h">${img(I.img, a.item, 'ipop-img')}<div class="ipop-t"><b>${esc(a.item)}</b><span class="small muted">need ${fmt(a.need)}${a.fir ? ` · ${fmt(a.fir)} FiR` : ''}</span></div><button class="ibtn" data-act="it-close" aria-label="Close">${icon('x')}</button></div>
+    <div class="ipop-c">
+      <button class="btn" data-act="it-set" data-item="${attr(a.item)}" data-v="${Math.max(0, a.have - 1)}" aria-label="One less">${icon('minus')}</button>
+      <input type="number" min="0" max="${a.need}" value="${a.have}" data-itset="${attr(a.item)}" aria-label="How many you have">
+      <span class="ipop-of">/ ${fmt(a.need)}</span>
+      <button class="btn" data-act="it-set" data-item="${attr(a.item)}" data-v="${Math.min(a.need, a.have + 1)}" aria-label="One more">${icon('plus')}</button>
+      <button class="btn btn-p" data-act="it-set" data-item="${attr(a.item)}" data-v="${a.need}">All</button>
+      <button class="btn" data-act="it-set" data-item="${attr(a.item)}" data-v="0">None</button>
+    </div>
+    <div class="ipop-s small">${open.map(s => `<div><span class="${s.count > s.have ? '' : 'muted'}">${esc(srcLabel(s))}</span> <b>${fmt(s.have)}/${fmt(s.count)}</b>${s.fir ? ' <span class="fir">FiR</span>' : ''}</div>`).join('')}</div>
+    <div class="ipop-f"><button class="linkbtn" data-act="info-item" data-item="${attr(a.item)}">Where to find</button></div>
+  </div>`;
 }

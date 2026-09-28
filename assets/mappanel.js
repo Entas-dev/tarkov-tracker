@@ -32,6 +32,7 @@ export function initMapPanel() {
         <select class="mp-select" aria-label="Choose map"></select>
         <label class="tog small"><input type="checkbox" data-mp="extracts" checked> Extracts</label>
         <label class="tog small" data-tip="Quests view: loose-loot spawn points of items your active quests need, and doors for needed keys"><input type="checkbox" data-mp="loot" checked> Item spawns</label>
+        <label class="tog small" data-tip="Spawn spots of the BattlePass documents on this map"><input type="checkbox" data-mp="bp" ${store.ui.mpBp === false ? '' : 'checked'}> BattlePass</label>
         <span class="mp-status small muted"></span>
         <button class="ibtn" data-mp="size" aria-label="Enlarge">${icon('expand')}</button>
         <button class="ibtn" data-mp="toggle" aria-label="Collapse">${icon('x')}</button>
@@ -48,7 +49,7 @@ export function initMapPanel() {
   panel.addEventListener('click', (e) => {
     const b = e.target.closest('[data-mp]');
     if (b?.dataset.mp === 'toggle') togglePanel();
-    if (b?.dataset.mp === 'size') { panel.classList.toggle('big'); setTimeout(() => leafletMap?.invalidateSize(), 220); }
+    if (b?.dataset.mp === 'size') { panel.classList.toggle('big'); setTimeout(() => { leafletMap?.invalidateSize(); fitWhole(true); }, 220); }
     const fq = e.target.closest('[data-mpq]');
     if (fq) { focusQuest = fq.dataset.mpq === focusQuest ? null : fq.dataset.mpq; drawMarkers(true); renderList(); }
     const v = e.target.closest('[data-mpv]');
@@ -68,6 +69,7 @@ export function initMapPanel() {
   panel.querySelector('.mp-select').addEventListener('change', (e) => showMap(e.target.value));
   panel.querySelector('[data-mp="extracts"]').addEventListener('change', () => drawMarkers());
   panel.querySelector('[data-mp="loot"]').addEventListener('change', () => drawMarkers());
+  panel.querySelector('[data-mp="bp"]').addEventListener('change', (e) => { store.setUi('mpBp', e.target.checked); drawMarkers(); });
   store.on((reason) => {
     if (reason === 'profile' && initP && md?.gameMode !== store.profile.gameMode) { md = null; loadMarkers(); }
     if (reason === 'profile' && initP) { hl = { item: null, cont: null, fit: false }; ensureLoot(); }
@@ -179,6 +181,15 @@ function getCRS(cfg) {
 const pos = (p) => [p.z, p.x];
 const bnds = (b) => L.latLngBounds([b[0][1], b[0][0]], [b[1][1], b[1][0]]);
 
+// the whole map must fit when zoomed out fully: lower the min zoom to what the panel needs (tiles are scaled down)
+let curBounds = null;
+function fitWhole(fit = false) {
+  if (!leafletMap || !curBounds) return;
+  const z = leafletMap.getBoundsZoom(curBounds, false);
+  leafletMap.setMinZoom(Math.min(leafletMap.getMinZoom(), Math.floor(z * 4) / 4 - 0.25));
+  if (fit) leafletMap.fitBounds(curBounds);
+}
+
 async function showMap(key) {
   await ensureInit();
   const cfg = mapCfgs.find(m => m.key === key) || mapCfgs[0];
@@ -190,7 +201,7 @@ async function showMap(key) {
   leafletMap = L.map(mapEl, { crs: getCRS(cfg), minZoom: cfg.minZoom ?? 1, maxZoom: Math.max(cfg.maxZoom ?? 5, 6), zoomSnap: 0.25, attributionControl: false, zoomControl: true });
   const b = bnds(cfg.bounds);
   if (cfg.tilePath) {
-    L.tileLayer(cfg.tilePath, { tileSize: cfg.tileSize || 256, bounds: b, maxNativeZoom: cfg.maxZoom, maxZoom: Math.max(cfg.maxZoom ?? 5, 6) }).addTo(leafletMap);
+    L.tileLayer(cfg.tilePath, { tileSize: cfg.tileSize || 256, bounds: b, minNativeZoom: cfg.minZoom ?? 1, maxNativeZoom: cfg.maxZoom, maxZoom: Math.max(cfg.maxZoom ?? 5, 6) }).addTo(leafletMap);
   } else if (cfg.svgPath) {
     const sb = cfg.svgBounds ? bnds(cfg.svgBounds) : b;
     try {
@@ -202,10 +213,11 @@ async function showMap(key) {
       L.imageOverlay(cfg.svgPath, sb).addTo(leafletMap);
     }
   }
-  leafletMap.fitBounds(b);
+  curBounds = b;
+  fitWhole(true);
   const hlOn = view() === 'loot' && (hl.item != null || hl.cont);
   if (hlOn) hl.fit = true;
-  setTimeout(() => { leafletMap?.invalidateSize(); if (hlOn) { hl.fit = true; drawMarkers(); } else if (!focusQuest) leafletMap?.fitBounds(b); }, 80);
+  setTimeout(() => { leafletMap?.invalidateSize(); fitWhole(!hlOn && !focusQuest); if (hlOn) { hl.fit = true; drawMarkers(); } }, 80);
   markerLayer = L.layerGroup().addTo(leafletMap);
   extractLayer = L.layerGroup().addTo(leafletMap);
   lootLayer = L.layerGroup().addTo(leafletMap);
@@ -375,6 +387,18 @@ function drawMarkers(fit = false) {
     for (const m of mp) for (const k of m.locks) {
       if (!keys.has(k.k)) continue;
       L.marker(pos(k.p), { icon: L.divIcon({ className: 'mk mk-lock', html: `<span>${icon('lock')}</span>`, iconSize: [20, 20] }) }).bindPopup(`<b>Door for</b><br>${esc(keys.get(k.k))}`).addTo(lootLayer);
+    }
+  }
+  // BattlePass documents: always on every map (unless switched off)
+  if (lp && panel.querySelector('[data-mp="bp"]')?.checked) {
+    const ld = lootData();
+    const docs = new Set((D.battlepass?.docTypes || []).map(t => t.name));
+    const bpIdx = new Map();
+    ld.items.forEach(x => { if (docs.has(x.n) || /battlepass/i.test(D.items[x.n]?.type || '')) bpIdx.set(x.i, x.n); });
+    for (const l of lp.loose) {
+      const hit = []; for (let q = 2; q < l.length; q++) if (bpIdx.has(l[q])) hit.push(bpIdx.get(l[q]));
+      if (!hit.length) continue;
+      L.marker(xz(l[0], l[1]), { icon: L.divIcon({ className: 'mk mk-bp', html: '<span>BP</span>', iconSize: [20, 16] }), zIndexOffset: 300 }).bindPopup(`<b>BattlePass document</b><br>${[...new Set(hit)].map(esc).join('<br>')}`).addTo(lootLayer);
     }
   }
   // loot view: highlighted item (loose spots + containers that can hold it) or one container type

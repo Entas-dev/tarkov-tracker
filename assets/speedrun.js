@@ -1,7 +1,7 @@
 // Speedrun planner: simulates your progression raid by raid and bundles every quest objective
-// (all traders + the Tour story chapter) that can be done on the same map into one raid.
+// (all traders + all story chapters) that can be done on the same map into one raid.
 import { store } from './store.js';
-import { D, IX, P, visible, questStatus, isDone, mapUnlocked, traderUnlocked, traderLL, varNeed } from './model.js';
+import { D, IX, P, visible, questStatus, isDone, mapUnlocked, traderUnlocked, traderLL, varNeed, condStatus } from './model.js';
 import { esc, attr, icon, img, traderImg, qlink, itemChip, fmt, progressBar } from './ui.js';
 import { openPanel } from './components.js';
 import { lootData, ensureLoot, lootState, neededLoot, lootForMap, whereText, itemImg, lootItem, bestMaps, mapDisplayName } from './loot.js';
@@ -29,46 +29,91 @@ function objType(q, o) {
   return maps.length ? 'raid' : 'menu';
 }
 const hasChildren = (list, o) => list.some(x => x.parent === o.id);
-// Tour objectives without a map link inherit the map of the next mapped step (e.g. the Terminal intercom → Shoreline)
-function tourMap(tour, o) {
-  if (o.maps?.length) return o.maps[0];
-  if (!RAID_KINDS.has(o.kind)) return null;
-  const i = tour.objectives.indexOf(o);
-  for (let k = i + 1; k < tour.objectives.length; k++) { const x = tour.objectives[k]; if (x.maps?.length && RAID_KINDS.has(x.kind)) return x.maps[0]; }
-  return null;
-}
-const tourType = (tour, o) => (hasChildren(tour.objectives, o) ? 'parent' : MENU_KINDS.has(o.kind) ? 'menu' : tourMap(tour, o) ? 'raid' : 'menu');
 const levelFor = (exp) => { let l = 1; for (const r of D.expTable || []) if (exp >= r.total) l = r.level; return l; };
 const expFor = (level) => (D.expTable || []).find(r => r.level === level)?.total || 0;
 
 function cloneProfile(p) {
-  return { ...p, quests: { ...p.quests }, obj: { ...p.obj }, ch: { ...p.ch }, chObj: { ...p.chObj }, settings: { ...p.settings, ll: { ...(p.settings.ll || {}) } } };
+  return { ...p, quests: { ...p.quests }, obj: { ...p.obj }, ch: { ...p.ch }, chObj: { ...p.chObj }, chStart: { ...(p.chStart || {}) }, hideout: { ...(p.hideout || {}) }, settings: { ...p.settings, ll: { ...(p.settings.ll || {}) } } };
 }
 const objDoneIn = (sp, qn, oid) => !!sp.quests[qn] || !!sp.obj[`${qn}|${oid}`];
-const tourDoneIn = (sp, oid) => !!sp.ch['Tour'] || !!sp.chObj[`Tour|${oid}`];
 
-// Complete everything that needs no raid: Tour talk/hand-in steps, quest hand-ins, finished quests.
+// ---------- story chapters (all of them, not only Tour) ----------
+const chDoneIn = (sp, c, oid) => !!sp.ch[c] || !!sp.chObj[`${c}|${oid}`];
+const linksIn = (html) => [...String(html || '').matchAll(/data-t="([^"]+)"/g)].map(m => m[1]);
+// maps / keys named in the unlock text of a chapter ("Pick up the note … on Customs")
+export function chapterStart(c) {
+  if (c._start) return c._start;
+  const txt = (c.reqHtml || []).join(' ');
+  const maps = [...new Set(linksIn(txt).filter(t => IX.maps.includes(t)))];
+  const keys = [...new Set(linksIn(txt).filter(t => /key|keycard/i.test(D.items[t]?.type || '') || /\bkey(card)?\b/i.test(t) && D.items[t]))];
+  const first = (c.reqHtml || []).find(r => r && !/^File:/i.test(r)) || '';
+  return (c._start = { maps, keys, html: first, tour: /data-t="Tour"/.test(txt), ic: (txt.match(/Intelligence Center level (\d)/i) || [])[1] });
+}
+function preOk(c, sp) { return (c.prereq || []).every(g => g.some(a => (D.chapters[a.q] ? !!sp.ch[a.q] : !!sp.quests[a.q]))); }
+export function chapterStarted(c, sp) {
+  if (sp.ch[c.name] || sp.chStart?.[c.name] || c.name === 'Tour') return true;
+  if (c.objectives.some(o => sp.chObj[`${c.name}|${o.id}`])) return true;
+  if (!preOk(c, sp)) return false;
+  const st = chapterStart(c);
+  if (st.ic && (sp.hideout?.['Intelligence Center'] || 0) >= +st.ic) return true;
+  if (st.tour) { const tr = linksIn((c.reqHtml || []).join(' ')).find(t => D.traders[t]); return tr ? traderUnlocked(tr, sp) : !!sp.ch['Tour']; }
+  return !st.maps.length && !st.ic && (c.prereq || []).length > 0; // unlocked by finishing the previous chapter (The Ticket)
+}
+function chMap(c, o) {
+  if (o.maps?.length) return o.maps[0];
+  if (c.name !== 'Tour' || !(RAID_KINDS.has(o.kind) || o.kind === 'find' || o.kind === 'other')) return null;
+  // Tour objectives without a map link inherit the map of the next mapped step (e.g. the Terminal intercom → Shoreline)
+  const i = c.objectives.indexOf(o);
+  for (let k = i + 1; k < c.objectives.length; k++) { const x = c.objectives[k]; if (x.maps?.length && RAID_KINDS.has(x.kind)) return x.maps[0]; }
+  return null;
+}
+const MODS = () => D.hideout.modules.map(m => m.name);
+const MENU_TXT = /^(\(optional\)\s*)?(learn|find out|ask|talk|tell|report|wait|figure out|decide|choose|read|hand over|pay|give|return to the hideout|return to)/i;
+// 'parent' | 'menu' (done at a trader / hideout) | 'raid' (on a map) | 'block' (hideout level / loyalty still missing) | 'unmapped' (in raid, map unknown)
+function chStepType(c, o, sp) {
+  if (hasChildren(c.objectives, o)) return 'parent';
+  const t = o.text || '';
+  const hm = t.match(new RegExp(`(${MODS().join('|')})\\s*level\\s*(\\d)`, 'i'));
+  if (hm && /obtain|build|construct|upgrade|reach/i.test(t)) { const mod = MODS().find(m => m.toLowerCase() === hm[1].toLowerCase()); return (sp.hideout?.[mod] || 0) >= +hm[2] ? 'menu' : 'block'; }
+  const lm = t.match(/Loyalty Level (\d) with (\w[\w ]*)/i);
+  if (lm) { const tr = Object.keys(D.traders).find(x => lm[2].toLowerCase().startsWith(x.toLowerCase())); return tr && traderLL(tr, sp) >= +lm[1] ? 'menu' : 'block'; }
+  if (MENU_KINDS.has(o.kind) || MENU_TXT.test(t)) return 'menu';
+  if (chMap(c, o)) return 'raid';
+  if (RAID_KINDS.has(o.kind) || o.kind === 'find' || o.kind === 'other') return 'unmapped';
+  return 'menu';
+}
+const applies = (o, sp) => (!o.endings || o.endings.includes(sp.settings.ending || 'Savior')) && condStatus(o.cond, sp) !== false;
+// next steps of a started chapter, in order, until something needs a raid
+function chapterNext(c, sp) {
+  const out = [];
+  for (const o of c.objectives) {
+    if (o.optional || chDoneIn(sp, c.name, o.id) || !applies(o, sp)) continue;
+    if ((o.depth || 1) > 1 && o.parent && chDoneIn(sp, c.name, o.parent)) continue;
+    out.push({ o, t: chStepType(c, o, sp) });
+  }
+  return out;
+}
+
+// Complete everything that needs no raid: story talk/hand-in steps, quest hand-ins, finished quests.
 function autoAdvance(sp, log) {
-  const tour = D.chapters?.['Tour'];
   let changed = true, guard = 0;
-  while (changed && guard++ < 50) {
+  while (changed && guard++ < 60) {
     changed = false;
-    // Tour: sequential, stop at the first step that needs a raid
-    if (tour && !sp.ch['Tour']) {
-      for (const o of tour.objectives) {
-        if (o.optional || tourDoneIn(sp, o.id)) continue;
-        if ((o.depth || 1) > 1 && o.parent && tourDoneIn(sp, o.parent)) continue;
-        const t = tourType(tour, o);
+    for (const cn of IX.chapterOrder) {
+      const c = D.chapters[cn];
+      if (!c || sp.ch[cn] || !chapterStarted(c, sp)) continue;
+      for (const { o, t } of chapterNext(c, sp)) {
         if (t === 'parent') {
-          const kids = tour.objectives.filter(x => x.parent === o.id && !x.optional);
-          if (kids.every(x => tourDoneIn(sp, x.id))) { sp.chObj[`Tour|${o.id}`] = 1; changed = true; continue; }
-          continue; // its children come next
+          const kids = c.objectives.filter(x => x.parent === o.id && !x.optional && applies(x, sp));
+          if (kids.every(x => chDoneIn(sp, cn, x.id))) { sp.chObj[`${cn}|${o.id}`] = 1; changed = true; continue; }
+          continue;
         }
         if (t === 'raid') break;
-        sp.chObj[`Tour|${o.id}`] = 1; changed = true;
-        log?.tour.push(o);
+        if (t === 'block' || t === 'unmapped') { if (log?.blocked && !log.blocked.some(b => b.c === cn)) log.blocked.push({ c: cn, o, t }); break; }
+        sp.chObj[`${cn}|${o.id}`] = 1; changed = true;
+        log?.story.push({ c: cn, o });
       }
-      if (tour.objectives.every(o => o.optional || tourDoneIn(sp, o.id))) { sp.ch['Tour'] = 1; }
+      if (c.objectives.every(o => o.optional || !applies(o, sp) || chDoneIn(sp, cn, o.id))) { sp.ch[cn] = 1; changed = true; }
     }
     // quests: when every raid objective is done, the rest happens at the trader
     for (const n of IX.order) {
@@ -86,7 +131,7 @@ function autoAdvance(sp, log) {
 }
 
 function candidates(sp) {
-  const cand = {}; // map -> [{kind:'quest'|'tour', q, o}]
+  const cand = {}; // map -> [{kind:'quest'|'ch'|'start', …}]
   const add = (m, e) => { (cand[m] = cand[m] || []).push(e); };
   for (const n of IX.order) {
     const q = D.quests[n];
@@ -94,23 +139,30 @@ function candidates(sp) {
     const earlier = []; // undone raid objectives before this one: a later step can only share their raid (same map)
     for (const o of q.objectives) {
       if (o.optional || objDoneIn(sp, n, o.id) || objType(q, o) !== 'raid' || hasChildren(q.objectives, o)) continue;
-      for (const m of objMaps(q, o)) if (mapUnlocked(m, sp) && earlier.every(e => objMaps(q, e).includes(m))) add(m, { kind: 'quest', q, o });
+      const ms = objMaps(q, o).filter(m => mapUnlocked(m, sp) && earlier.every(e => objMaps(q, e).includes(m)));
+      // an objective you can do on several maps counts less for each of them – exclusive objectives decide the map
+      const w = 1 / Math.sqrt(Math.max(1, ms.length));
+      for (const m of ms) add(m, { kind: 'quest', q, o, w });
       earlier.push(o);
     }
   }
-  // Tour: the next raid step(s) – consecutive steps on the same map count together
-  const tour = D.chapters?.['Tour'];
-  if (tour && !sp.ch['Tour']) {
-    let map = null;
-    for (const o of tour.objectives) {
-      if (o.optional || tourDoneIn(sp, o.id)) continue;
-      const t = tourType(tour, o);
-      if (t === 'parent') continue;
-      if (t !== 'raid') break;
-      const m = tourMap(tour, o);
-      if (map && m !== map) break;
-      map = m;
-      if (mapUnlocked(m, sp)) add(m, { kind: 'tour', o });
+  for (const cn of IX.chapterOrder) {
+    const c = D.chapters[cn];
+    if (!c || sp.ch[cn]) continue;
+    if (chapterStarted(c, sp)) {
+      // the next raid step(s) – consecutive steps on the same map count together
+      let map = null;
+      for (const { o, t } of chapterNext(c, sp)) {
+        if (t === 'parent') continue;
+        if (t !== 'raid') break;
+        const m = chMap(c, o);
+        if (map && m !== map) break;
+        map = m;
+        if (mapUnlocked(m, sp)) add(m, { kind: 'ch', c: cn, o });
+      }
+    } else if (preOk(c, sp)) {
+      // storyline not started yet: pick up its note / visit its spot as early as possible
+      for (const m of chapterStart(c).maps) if (mapUnlocked(m, sp)) add(m, { kind: 'start', c: cn });
     }
   }
   return cand;
@@ -120,8 +172,9 @@ function scoreMap(entries, sp) {
   let s = 0;
   const perQuest = {};
   for (const e of entries) {
-    if (e.kind === 'tour') { s += 4; continue; }
-    s += sp.active?.[e.q.name] ? 1.5 : 1;
+    if (e.kind === 'ch') { s += 4; continue; }
+    if (e.kind === 'start') { s += 6; continue; }
+    s += (sp.active?.[e.q.name] ? 1.5 : 1) * (e.w ?? 1);
     (perQuest[e.q.name] = perQuest[e.q.name] || []).push(e.o.id);
   }
   for (const [n, ids] of Object.entries(perQuest)) {
@@ -146,13 +199,14 @@ function lootBonusFn(needs) {
   };
 }
 
+const ekey = (e) => (e.kind === 'ch' ? `C${e.c}|${e.o.id}` : e.kind === 'start' ? `S${e.c}` : `${e.q.name}|${e.o.id}`);
 export function planRaids({ maxRaids = 10, expPerRaid = 4000, lootNeeds = null } = {}) {
   const base = P();
   const lootBonus = lootBonusFn(lootNeeds);
   const sp = cloneProfile(base);
   let exp = expFor(sp.settings.level);
   const raids = [];
-  const pre = { tour: [], done: [], loot: [] };
+  const pre = { story: [], done: [], loot: [], blocked: [] };
   autoAdvance(sp, pre);
   for (let r = 0; r < maxRaids; r++) {
     const cand = candidates(sp);
@@ -160,9 +214,8 @@ export function planRaids({ maxRaids = 10, expPerRaid = 4000, lootNeeds = null }
     if (!maps.length) break;
     let best = null, bestScore = -1;
     for (const m of maps) {
-      // an objective that allows several maps is only counted once per quest+objective
       const uniq = []; const seen = new Set();
-      for (const e of cand[m]) { const k = e.kind === 'tour' ? 'T' + e.o.id : e.q.name + '|' + e.o.id; if (!seen.has(k)) { seen.add(k); uniq.push(e); } }
+      for (const e of cand[m]) { const k = ekey(e); if (!seen.has(k)) { seen.add(k); uniq.push(e); } }
       cand[m] = uniq;
       const sc = scoreMap(uniq, sp) + lootBonus(m);
       if (sc > bestScore) { bestScore = sc; best = m; }
@@ -170,16 +223,18 @@ export function planRaids({ maxRaids = 10, expPerRaid = 4000, lootNeeds = null }
     const entries = cand[best];
     const levelBefore = sp.settings.level;
     for (const e of entries) {
-      if (e.kind === 'tour') sp.chObj[`Tour|${e.o.id}`] = 1;
+      if (e.kind === 'ch') sp.chObj[`${e.c}|${e.o.id}`] = 1;
+      else if (e.kind === 'start') sp.chStart[e.c] = 1;
       else sp.obj[`${e.q.name}|${e.o.id}`] = 1;
     }
-    const log = { tour: [], done: [], loot: [] };
+    const log = { story: [], done: [], loot: [], blocked: [] };
     autoAdvance(sp, log);
     // EXP only for quests actually finished through raid objectives – item/menu-only quests are assumed but not credited
     const hasRaidObj = (n) => { const q = D.quests[n]; return q.objectives.some(o => !o.optional && objType(q, o) === 'raid'); };
     const gained = log.done.filter(hasRaidObj).reduce((s, n) => s + (D.quests[n].exp || 0), 0) + expPerRaid;
     if (expPerRaid > 0) { exp += gained; sp.settings.level = Math.max(sp.settings.level, levelFor(exp)); }
-    raids.push({ map: best, entries, turnIns: log.done, lootQuests: log.loot, tourAfter: log.tour, level: levelBefore, levelAfter: sp.settings.level, score: bestScore });
+    raids.push({ map: best, entries, turnIns: log.done, lootQuests: log.loot, storyAfter: log.story, level: levelBefore, levelAfter: sp.settings.level, score: bestScore });
+    for (const b of log.blocked) if (!pre.blocked.some(x => x.c === b.c)) pre.blocked.push({ ...b, after: r + 1 });
   }
   // loot to collect for quests that are (or become) available in the plan
   const loot = {};
@@ -197,34 +252,52 @@ export function planRaids({ maxRaids = 10, expPerRaid = 4000, lootNeeds = null }
   return { raids, prelude: pre, loot: Object.values(loot).sort((a, b) => b.quests.length - a.quests.length) };
 }
 
+// what to take into the raid: markers / items to stash or place, gear to wear or use, keys (also for storyline starts)
+function bringList(r) {
+  const items = {}, wear = {}, keys = {};
+  const isKey = (n) => /key|keycard/i.test(D.items[n]?.type || '') || /\bkey(card)?\b/i.test(n);
+  for (const e of r.entries) {
+    if (e.kind === 'start') { for (const k of chapterStart(D.chapters[e.c]).keys) keys[k] = keys[k] || { item: k, count: 1, alt: true }; continue; }
+    const o = e.o;
+    for (const it of o.items || []) {
+      const I = D.items[it.item];
+      if (!I || I.questItem || I.currency) continue;
+      if (isKey(it.item)) { keys[it.item] = keys[it.item] || { item: it.item, count: 1 }; continue; }
+      if (['mark', 'place', 'use'].includes(o.kind) || /\b(mark|stash|plant|place|install|hide|leave|put|use)\b/i.test(o.text)) { const a = items[it.item] || (items[it.item] = { item: it.item, count: 0 }); a.count += it.count || 1; }
+      else if (/\b(wear|wearing|equipped|using|while|with an?|with the)\b/i.test(o.text) && ['kill', 'visit', 'extract', 'other'].includes(o.kind)) wear[it.item] = wear[it.item] || { item: it.item, count: 1 };
+    }
+    if (e.q) for (const nd of e.q.needs || []) if (isKey(nd.item) && (!nd.objectives?.length || nd.objectives.includes(o.id))) keys[nd.item] = keys[nd.item] || { item: nd.item, count: 1 };
+  }
+  return { items: Object.values(items), wear: Object.values(wear), keys: Object.values(keys) };
+}
+
 // ---------- stored plan (only recalculated on request) ----------
-const PLAN_V = 1;
+const PLAN_V = 2;
 function progressSig(p) {
   const keys = (o) => Object.keys(o || {}).filter(k => o[k]).sort().join(',');
-  const str = [keys(p.quests), keys(p.obj), keys(p.ch), keys(p.chObj), keys(p.active), JSON.stringify(p.hideout || {}), p.settings.level].join('|');
+  const str = [keys(p.quests), keys(p.obj), keys(p.ch), keys(p.chObj), keys(p.chStart), keys(p.active), JSON.stringify(p.hideout || {}), p.settings.level].join('|');
   let h = 5381;
   for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0;
   return String(h >>> 0);
 }
+const serE = (e) => (e.kind === 'ch' ? ['C', e.c, e.o.id] : e.kind === 'start' ? ['S', e.c] : [e.q.name, e.o.id]);
+const serS = (x) => [x.c, x.o.id];
 function serializePlan(plan) {
   return {
-    raids: plan.raids.map(r => ({ map: r.map, e: r.entries.map(e => (e.kind === 'tour' ? ['T', e.o.id] : [e.q.name, e.o.id])), t: r.turnIns, l: r.lootQuests || [], ta: r.tourAfter.map(o => o.id), lv: r.level, la: r.levelAfter })),
-    pre: { tour: plan.prelude.tour.map(o => o.id), done: plan.prelude.done, loot: plan.prelude.loot },
+    raids: plan.raids.map(r => ({ map: r.map, e: r.entries.map(serE), t: r.turnIns, l: r.lootQuests || [], sa: r.storyAfter.map(serS), lv: r.level, la: r.levelAfter })),
+    pre: { story: plan.prelude.story.map(serS), done: plan.prelude.done, loot: plan.prelude.loot, blocked: plan.prelude.blocked.map(b => [b.c, b.o.id, b.t, b.after || 0]) },
     loot: plan.loot,
   };
 }
 function hydratePlan(d) {
-  const tour = D.chapters?.['Tour'];
-  const tobj = (id) => tour?.objectives.find(o => o.id === id) || null;
+  const cobj = (c, id) => D.chapters[c]?.objectives.find(o => o.id === id) || null;
   const qobj = (n, id) => D.quests[n]?.objectives.find(o => o.id === id) || null;
   const q = (n) => !!D.quests[n];
+  const hs = ([c, id]) => (cobj(c, id) ? { c, o: cobj(c, id) } : null);
+  const he = (a) => (a[0] === 'C' ? (cobj(a[1], a[2]) ? { kind: 'ch', c: a[1], o: cobj(a[1], a[2]) } : null) : a[0] === 'S' ? (D.chapters[a[1]] ? { kind: 'start', c: a[1] } : null) : (qobj(a[0], a[1]) ? { kind: 'quest', q: D.quests[a[0]], o: qobj(a[0], a[1]) } : null));
   return {
-    raids: d.raids.map(r => ({
-      map: r.map,
-      entries: r.e.map(([a, b]) => (a === 'T' ? (tobj(b) ? { kind: 'tour', o: tobj(b) } : null) : (qobj(a, b) ? { kind: 'quest', q: D.quests[a], o: qobj(a, b) } : null))).filter(Boolean),
-      turnIns: r.t.filter(q), lootQuests: r.l.filter(q), tourAfter: r.ta.map(tobj).filter(Boolean), level: r.lv, levelAfter: r.la,
-    })).filter(r => r.entries.length),
-    prelude: { tour: d.pre.tour.map(tobj).filter(Boolean), done: d.pre.done.filter(q), loot: d.pre.loot.filter(q) },
+    raids: d.raids.map(r => ({ map: r.map, entries: r.e.map(he).filter(Boolean), turnIns: r.t.filter(q), lootQuests: r.l.filter(q), storyAfter: r.sa.map(hs).filter(Boolean), level: r.lv, levelAfter: r.la })).filter(r => r.entries.length),
+    prelude: { story: d.pre.story.map(hs).filter(Boolean), done: d.pre.done.filter(q), loot: d.pre.loot.filter(q), blocked: d.pre.blocked.map(([c, id, t, after]) => (cobj(c, id) ? { c, o: cobj(c, id), t, after } : null)).filter(Boolean) },
     loot: (d.loot || []).filter(a => D.items[a.item]),
   };
 }
@@ -237,6 +310,8 @@ function agoText(t) {
   const m = Math.round((Date.now() - t) / 60000);
   return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 48 * 60 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} days ago`;
 }
+const chIcon = (c) => img(D.chapters[c]?.iconImg, '', 'mp-tr ch-mini');
+const storySteps = (list) => { const by = {}; for (const x of list) (by[x.c] = by[x.c] || []).push(x.o); return Object.entries(by).map(([c, os]) => `<span class="small">${chIcon(c)} <b>${esc(c)}</b>: ${os.map(o => esc(o.text)).join(' → ')}</span>`).join(' '); };
 
 // ---------- tab ----------
 export function renderSpeedrun(root) {
@@ -256,7 +331,7 @@ export function renderSpeedrun(root) {
     store.setUi('srPlans', { ...(store.ui.srPlans || {}), [store.active]: stored });
   }
   const stale = stored.sig !== sig;
-  const entryDone = (e) => (e.kind === 'tour' ? !!p.ch['Tour'] || !!p.chObj['Tour|' + e.o.id] : isDone(e.q.name, p) || !!p.obj[e.q.name + '|' + e.o.id]);
+  const entryDone = (e) => (e.kind === 'ch' ? !!p.ch[e.c] || !!p.chObj[`${e.c}|${e.o.id}`] : e.kind === 'start' ? chapterStarted(D.chapters[e.c], p) : isDone(e.q.name, p) || !!p.obj[e.q.name + '|' + e.o.id]);
   const raidDone = (r) => r.entries.every(entryDone);
   // quests that the plan works on count as "soon" for item priorities
   const soon = new Set();
@@ -267,17 +342,9 @@ export function renderSpeedrun(root) {
   const ms = Math.round(performance.now() - t0);
   const totalObj = plan.raids.reduce((s, r) => s + r.entries.length, 0);
   const totalQ = plan.raids.reduce((s, r) => s + r.turnIns.length, 0);
-  const bring = (r) => {
-    const items = {};
-    for (const e of r.entries) {
-      if (e.kind !== 'quest') continue;
-      if (e.o.kind === 'mark' || e.o.kind === 'place' || e.o.kind === 'use') for (const it of e.o.items || []) { const a = items[it.item] || (items[it.item] = { item: it.item, count: 0 }); a.count += it.count || 1; }
-      for (const nd of e.q.needs || []) if (/key/i.test(D.items[nd.item]?.type || nd.item) && nd.objectives?.includes(e.o.id)) items[nd.item] = items[nd.item] || { item: nd.item, count: 1 };
-    }
-    return Object.values(items);
-  };
+  const pr = plan.prelude;
   root.innerHTML = `
-  <div class="tab-head"><div><h1>Speedrun Guide</h1><p class="lede">Your next raids, planned from your current progress: every objective that can be done on the same map is bundled into one raid – across all traders and the Tour chapter. Tick objectives here or anywhere else – the plan stays put until you press <b>Recalculate</b>.</p></div>
+  <div class="tab-head"><div><h1>Speedrun Guide</h1><p class="lede">Your next raids, planned from your current progress: every objective that can be done on the same map is bundled into one raid – across all traders and all story chapters. Raids with a <b class="c-story">red frame</b> move a storyline forward or start a new one. The plan stays put until you press <b>Recalculate</b>.</p></div>
     <div class="head-stat"><div class="stat"><b>${plan.raids.length}</b> raids · <b>${totalObj}</b> objectives · <b>${totalQ}</b> quests finished</div></div></div>
   <div class="notice">${icon('list')}<div>Quicker than ticking finished quests: <b>tell the tracker which quests are open in your game</b> and it marks everything before them as done. <button class="btn btn-s btn-p" data-act="active-setup">Set my open quests</button></div></div>
   <div class="filters">
@@ -289,37 +356,40 @@ export function renderSpeedrun(root) {
     <span class="small muted">planned ${agoText(stored.at)}</span>
   </div>
   ${stale ? `<div class="notice sr-stale">${icon('refresh')}<div>Your progress changed since this plan was made. Ticks show up here, but the raid order stays as it is until you press <b>Recalculate</b>. <button class="btn btn-s btn-p" data-act="sr-recalc">Recalculate now</button></div></div>` : ''}
-  ${plan.prelude.tour.length || plan.prelude.done.length || plan.prelude.loot.length ? `<section class="panel sr-pre"><div class="panel-h"><h2>Right now, before your next raid</h2></div>
-    ${plan.prelude.tour.length ? `<div class="sub-h">Tour steps at the traders</div><ul class="plain">${plan.prelude.tour.map(o => `<li>${o.html}</li>`).join('')}</ul>` : ''}
-    ${plan.prelude.loot.length ? `<div class="sub-h">Collect the items and hand in</div><div class="chips">${plan.prelude.loot.map(n => `<span class="chip">${traderImg(D.quests[n].trader, 'chip-img')}${qlink(n)}</span>`).join('')}</div>` : ''}
-    ${plan.prelude.done.length ? `<div class="sub-h">Quests you can hand in</div><div class="chips">${plan.prelude.done.map(n => `<span class="chip">${traderImg(D.quests[n].trader, 'chip-img')}${qlink(n)}</span>`).join('')}</div>` : ''}</section>` : ''}
+  ${pr.story.length || pr.done.length || pr.loot.length || pr.blocked.length ? `<section class="panel sr-pre"><div class="panel-h"><h2>Right now, before your next raid</h2></div>
+    ${pr.story.length ? `<div class="sub-h">Story steps at the traders</div><div class="sr-story">${storySteps(pr.story)}</div>` : ''}
+    ${pr.loot.length ? `<div class="sub-h">Collect the items and hand in</div><div class="chips">${pr.loot.map(n => `<span class="chip">${traderImg(D.quests[n].trader, 'chip-img')}${qlink(n)}</span>`).join('')}</div>` : ''}
+    ${pr.done.length ? `<div class="sub-h">Quests you can hand in</div><div class="chips">${pr.done.map(n => `<span class="chip">${traderImg(D.quests[n].trader, 'chip-img')}${qlink(n)}</span>`).join('')}</div>` : ''}
+    ${pr.blocked.length ? `<div class="sub-h">Story steps the plan can't place on a map</div><ul class="sr-blocked">${pr.blocked.map(b => `<li>${chIcon(b.c)} <b>${esc(b.c)}</b>: ${b.o.html} <span class="small muted">${b.t === 'block' ? '– needs a hideout level / trader loyalty first' : '– location not on the wiki page, see the guide'}${b.after ? ` (reached after raid ${b.after})` : ''}</span> <button class="btn btn-s" data-act="info-ch" data-c="${attr(b.c)}">${icon('info')} Guide</button></li>`).join('')}</ul>` : ''}</section>` : ''}
   <ol class="raids">${plan.raids.map((r, i) => {
-    const groups = [];
-    const tourE = r.entries.filter(e => e.kind === 'tour');
-    const byQ = {};
-    for (const e of r.entries) if (e.kind === 'quest') (byQ[e.q.name] = byQ[e.q.name] || []).push(e.o);
-    const br = bring(r);
+    const chE = r.entries.filter(e => e.kind === 'ch');
+    const startE = r.entries.filter(e => e.kind === 'start');
+    const byC = {}; for (const e of chE) (byC[e.c] = byC[e.c] || []).push(e.o);
+    const byQ = {}; for (const e of r.entries) if (e.kind === 'quest') (byQ[e.q.name] = byQ[e.q.name] || []).push(e.o);
+    const br = bringList(r);
     const lt = raidLoot[i];
     const ltTop = lt.filter(x => x.prio >= 2).slice(0, 8);
     const ltRest = lt.filter(x => !ltTop.includes(x)).slice(0, 30);
     const rDone = raidDone(r);
-    return `<li class="raid ${rDone ? 'raid-done' : ''}">
-      <div class="raid-h"><span class="raid-n">${i + 1}</span><div class="raid-t"><h2>${esc(r.map)}${rDone ? ' <span class="badge b-done">' + icon('check') + 'Done</span>' : ''}</h2><div class="small muted">${r.entries.length} objective${r.entries.length > 1 ? 's' : ''} · ${Object.keys(byQ).length} quest${Object.keys(byQ).length !== 1 ? 's' : ''}${tourE.length ? ' + Tour' : ''} · est. level ${r.level}${r.levelAfter > r.level ? ` → ${r.levelAfter}` : ''}</div></div>
+    const story = chE.length || startE.length;
+    return `<li class="raid ${rDone ? 'raid-done' : ''} ${story ? 'raid-story' : ''}">
+      <div class="raid-h"><span class="raid-n">${i + 1}</span><div class="raid-t"><h2>${esc(r.map)}${story ? ' <span class="badge b-story">Storyline</span>' : ''}${rDone ? ' <span class="badge b-done">' + icon('check') + 'Done</span>' : ''}</h2><div class="small muted">${r.entries.length} objective${r.entries.length > 1 ? 's' : ''} · ${Object.keys(byQ).length} quest${Object.keys(byQ).length !== 1 ? 's' : ''}${Object.keys(byC).length ? ` + ${Object.keys(byC).join(', ')}` : ''} · est. level ${r.level}${r.levelAfter > r.level ? ` → ${r.levelAfter}` : ''}</div></div>
         <button class="btn btn-s" data-act="map" data-map="${attr(r.map)}">${icon('map')} Map</button></div>
-      ${br.length ? `<div class="raid-bring"><span class="small muted">Bring:</span> ${br.map(b => itemChip(b.item, { count: b.count, small: true })).join('')}</div>` : ''}
+      ${br.items.length || br.wear.length || br.keys.length ? `<div class="raid-bring">${br.items.length ? `<span class="small muted">Bring:</span> ${br.items.map(b => itemChip(b.item, { count: b.count, small: true })).join('')}` : ''}${br.wear.length ? ` <span class="small muted">Wear / use:</span> ${br.wear.map(b => itemChip(b.item, { small: true })).join('')}` : ''}${br.keys.length ? ` <span class="small muted">Keys:</span> ${br.keys.map(b => itemChip(b.item, { small: true })).join('')}${br.keys.some(k => k.alt) ? ' <span class="small muted">(one of them)</span>' : ''}` : ''}</div>` : ''}
       <div class="raid-b">
-        ${tourE.length ? `<div class="raid-q tour-q"><div class="raid-qh">${icon('flag')} <b>Tour</b> <span class="small muted">story chapter</span></div><ul class="objs">${tourE.map(e => `<li class="obj"><button class="cb cb-s ${p.chObj['Tour|' + e.o.id] ? 'on' : ''}" data-act="chobj" data-q="Tour" data-o="${e.o.id}" aria-label="Toggle">${icon('check')}</button><span class="obj-t">${e.o.html}</span></li>`).join('')}</ul></div>` : ''}
+        ${startE.map(e => { const c = D.chapters[e.c]; const st = chapterStart(c); return `<div class="raid-q story-q"><div class="raid-qh">${chIcon(e.c)} <b>Start storyline: ${esc(e.c)}</b><button class="ibtn" data-act="info-ch" data-c="${attr(e.c)}" aria-label="Guide">${icon('info')}</button></div><div class="small">${st.html}</div><button class="btn btn-s ${chapterStarted(c, p) ? 'on' : ''}" data-act="ch-start" data-c="${attr(e.c)}">${chapterStarted(c, p) ? 'Started ✓' : 'I picked it up – mark as started'}</button></div>`; }).join('')}
+        ${Object.entries(byC).map(([c, objs]) => `<div class="raid-q story-q"><div class="raid-qh">${chIcon(c)} <b>${esc(c)}</b> <span class="small muted">story chapter</span><button class="ibtn" data-act="info-ch" data-c="${attr(c)}" aria-label="Guide">${icon('info')}</button></div><ul class="objs">${objs.map(o => `<li class="obj"><button class="cb cb-s ${p.chObj[c + '|' + o.id] ? 'on' : ''}" data-act="chobj" data-q="${attr(c)}" data-o="${o.id}" aria-label="Toggle">${icon('check')}</button><span class="obj-t">${o.html}</span></li>`).join('')}</ul></div>`).join('')}
         ${Object.entries(byQ).map(([n, objs]) => `<div class="raid-q"><div class="raid-qh">${traderImg(D.quests[n].trader, 'mp-tr')} ${qlink(n)} ${notYet(n, p)}${r.turnIns.includes(n) ? '<span class="badge b-av" data-tip="All raid objectives done after this raid – hand it in">finishes</span>' : ''}<button class="ibtn" data-act="info" data-q="${attr(n)}" aria-label="Info">${icon('info')}</button></div>
           <ul class="objs">${objs.map(o => `<li class="obj"><button class="cb cb-s ${p.obj[n + '|' + o.id] ? 'on' : ''}" data-act="obj" data-q="${attr(n)}" data-o="${o.id}" aria-label="Toggle">${icon('check')}</button><span class="obj-t">${o.html}${o.kind === 'kill' && /\b([5-9]|\d{2,})\b/.test(o.text) ? ' <span class="small muted">(may need more than one raid)</span>' : ''}</span></li>`).join('')}</ul></div>`).join('')}
       </div>
       ${lt.length ? `<div class="raid-loot"><div class="raid-lh">${icon('box')} <span class="small"><b>Grab on ${esc(r.map)}</b> – items you still need for quests / hideout that spawn here</span></div>
         ${ltTop.length ? `<div class="chips">${ltTop.map(x => lootChip(x, r.map)).join('')}</div>` : ''}
         ${ltRest.length ? `<details class="raid-more"><summary class="small">${ltTop.length ? 'More' : 'Items for later'} (${ltRest.length})</summary><div class="chips">${ltRest.map(x => lootChip(x, r.map)).join('')}</div></details>` : ''}</div>` : ''}
-      ${r.turnIns.length || r.tourAfter.length || r.lootQuests?.length ? `<div class="raid-after"><span class="small muted">After the raid:</span> ${r.tourAfter.length ? `<span class="small">Tour: ${r.tourAfter.map(o => o.text).map(esc).join(' → ')}</span>` : ''} ${r.turnIns.length ? `<span class="small">hand in ${r.turnIns.map(n => qlink(n)).join(', ')}</span>` : ''}${r.lootQuests?.length ? ` <span class="small">· unlocked item quests: ${r.lootQuests.map(n => qlink(n)).join(', ')}</span>` : ''}</div>` : ''}
+      ${r.turnIns.length || r.storyAfter.length || r.lootQuests?.length ? `<div class="raid-after"><span class="small muted">After the raid:</span> ${storySteps(r.storyAfter)} ${r.turnIns.length ? `<span class="small">hand in ${r.turnIns.map(n => qlink(n)).join(', ')}</span>` : ''}${r.lootQuests?.length ? ` <span class="small">· unlocked item quests: ${r.lootQuests.map(n => qlink(n)).join(', ')}</span>` : ''}</div>` : ''}
     </li>`;
   }).join('') || '<div class="empty">Nothing to plan – every available quest objective is done, or the next quests need a higher level / trader loyalty.</div>'}</ol>
   ${lootPlanHtml(plan, needs, raidLoot, ld)}
-  <p class="small muted">How it's planned: from your ticked progress the planner simulates raid by raid. Each raid picks the map where you can do the most objectives, preferring Tour steps (they unlock traders and maps) and objectives that finish a quest. After each raid it hands in finished quests and estimates your level from quest EXP plus the EXP-per-raid setting. Objectives that allow several maps are assigned to one of them. When two maps are about equal, the one where more of your needed items can spawn wins. Item spawns: loose-loot spots and container positions from tarkov.dev, container contents from the wiki loot tables – spawns are random, so this tells you where your odds are best, not where an item is guaranteed. Computed in ${ms} ms.</p>`;
+  <p class="small muted">How it's planned: from your ticked progress the planner simulates raid by raid. Each raid picks the map where you get the most done: storyline starts count most (so you pick up every storyline as early as possible), then story steps, then quest objectives – an objective that is possible on several maps counts less than one that only works on this map, and objectives that finish a quest count extra. After each raid it hands in finished quests and estimates your level from quest EXP plus the EXP-per-raid setting. When two maps are about equal, the one where more of your needed items can spawn wins. Item spawns: loose-loot spots and container positions from tarkov.dev, container contents from the wiki loot tables. Computed in ${ms} ms.</p>`;
 }
 
 // quest that is not unlocked in your game yet – the plan expects it to open after earlier hand-ins / level-ups

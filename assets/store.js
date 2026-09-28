@@ -9,7 +9,7 @@ export const PROFILES = [
 const blankProgress = () => ({
   quests: {}, active: {}, obj: {}, cnt: {},
   hideout: {}, hcnt: {},
-  ch: {}, chObj: {},
+  ch: {}, chObj: {}, chStart: {}, autoBy: {},
   ach: {}, bp: {}, bpDocs: {}, prestige: {}, prestigeManual: {},
   settings: { level: 1, faction: 'USEC', eod: false, unheard: false, ending: 'Savior', ll: {}, llAuto: true },
 });
@@ -41,13 +41,66 @@ function save() {
   saveT = setTimeout(() => { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { console.warn('save failed', e); } }, 150);
 }
 
+// ---------- change history (per profile, small diffs, undo to any point) ----------
+const TRACK = ['quests', 'active', 'obj', 'cnt', 'hideout', 'hcnt', 'ch', 'chObj', 'chStart', 'ach', 'bp', 'bpDocs', 'prestige', 'prestigeManual', 'autoBy'];
+const HIST_MAX = 60;
+function snapMaps(p) {
+  const o = {};
+  for (const k of TRACK) o[k] = { ...(p[k] || {}) };
+  o.level = p.settings.level; o.ll = { ...(p.settings.ll || {}) }; o.choices = { ...(p.settings.choices || {}) };
+  return o;
+}
+function diffMaps(b, p) {
+  const ch = {}; let n = 0;
+  const cmp = (k, a, c) => { for (const key of new Set([...Object.keys(a), ...Object.keys(c)])) if (JSON.stringify(a[key]) !== JSON.stringify(c[key])) { (ch[k] = ch[k] || {})[key] = a[key] === undefined ? null : a[key]; if (k !== 'autoBy') n++; } };
+  for (const k of TRACK) cmp(k, b[k], p[k] || {});
+  cmp('$ll', b.ll, p.settings.ll || {});
+  cmp('$choices', b.choices, p.settings.choices || {});
+  if (b.level !== p.settings.level) { ch.$level = b.level; n++; }
+  return n ? { ch, n } : null;
+}
+function revert(p, ch) {
+  for (const [k, vals] of Object.entries(ch)) {
+    if (k === '$level') { p.settings.level = vals; continue; }
+    const tgt = k === '$ll' ? (p.settings.ll = p.settings.ll || {}) : k === '$choices' ? (p.settings.choices = p.settings.choices || {}) : (p[k] = p[k] || {});
+    for (const [key, v] of Object.entries(vals)) { if (v === null) delete tgt[key]; else tgt[key] = v; }
+  }
+}
+let nextLabel = null;
+
 export const store = {
   get active() { return state.active; },
   get profile() { return PROFILES.find(p => p.id === state.active); },
   get p() { return state.profiles[state.active]; },
   get ui() { return state.ui; },
   setActive(id) { state.active = id; save(); emit('profile'); },
-  update(fn, reason = 'progress') { fn(this.p); save(); emit(reason); },
+  update(fn, reason = 'progress', label = null) {
+    const p = this.p;
+    const before = snapMaps(p);
+    fn(p);
+    const d = diffMaps(before, p);
+    if (d) {
+      const h = (state.hist = state.hist || {});
+      const list = (h[state.active] = h[state.active] || []);
+      list.unshift({ t: Date.now(), label: label || nextLabel || reason, n: d.n, ch: d.ch });
+      if (list.length > HIST_MAX) list.length = HIST_MAX;
+    }
+    nextLabel = null;
+    save(); emit(reason);
+  },
+  // label for the next update (actions that call model helpers)
+  label(l) { nextLabel = l; },
+  get history() { return (state.hist?.[state.active] || []); },
+  // revert the newest entries up to and including index i
+  undoTo(i = 0) {
+    const list = state.hist?.[state.active] || [];
+    if (!list.length || i < 0 || i >= list.length) return 0;
+    const p = this.p;
+    const done = list.splice(0, i + 1);
+    for (const e of done) revert(p, e.ch);
+    save(); emit('progress');
+    return done.length;
+  },
   setUi(k, v) { state.ui[k] = v; save(); },
   on(fn) { listeners.add(fn); return () => listeners.delete(fn); },
   notify(reason) { emit(reason); },
@@ -59,7 +112,7 @@ export const store = {
     for (const p of PROFILES) s.profiles[p.id] = merge(blankProgress(), j.profiles[p.id] || {});
     state = s; save(); emit('profile');
   },
-  resetProfile(id = state.active) { state.profiles[id] = blankProgress(); save(); emit('profile'); },
+  resetProfile(id = state.active) { state.profiles[id] = blankProgress(); if (state.hist) state.hist[id] = []; save(); emit('profile'); },
 };
 
 function emit(reason) { for (const fn of listeners) { try { fn(reason); } catch (e) { console.error(e); } } }

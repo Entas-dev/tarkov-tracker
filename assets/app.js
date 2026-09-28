@@ -1,10 +1,10 @@
 // App bootstrap, header, routing, global actions
 import { store, PROFILES } from './store.js';
-import { D, IX, setDataset, P, visible, isDone, completeQuest, prerequisiteClosure, tourStepsFor, applyActiveQuests, doneDependents, uncompleteQuests, questObjProgress, objKey, chapterClosure, chDone, chapterProgress, hLevel, setModuleLevel, hideoutDependents, objVisibleForEnding, objApplies, condStatus, questStatus } from './model.js';
+import { D, IX, setDataset, P, visible, isDone, completeQuest, autoChecked, setItemHave, prerequisiteClosure, tourStepsFor, applyActiveQuests, doneDependents, uncompleteQuests, questObjProgress, objKey, chapterClosure, chDone, chapterProgress, hLevel, setModuleLevel, hideoutDependents, objVisibleForEnding, objApplies, condStatus, questStatus } from './model.js';
 import { esc, attr, icon, img, initTooltips, hideTip, confirmDialog, toast, $, $$ } from './ui.js';
-import { expanded, openQuestInfo, openChapterInfo, openItemInfo, openWikiPage, openModuleInfo, closeDrawer } from './components.js';
+import { expanded, openQuestInfo, openChapterInfo, openItemInfo, openWikiPage, openModuleInfo, closeDrawer, openPanel } from './components.js';
 import { renderStory, renderKappa, renderTraders, renderQuests } from './tabs-quests.js';
-import { renderHideout, renderPrestige, renderBattlepass, renderAchievements, renderItems } from './tabs-other.js';
+import { renderHideout, renderPrestige, renderBattlepass, renderAchievements, renderItems, itemFilter, itemList } from './tabs-other.js';
 import { loadDataset, buildLive, isStale, ageText, loadGameReqs } from './data.js';
 let gameReqs = null;
 import { initMapPanel, openMap, openMapLoot } from './mappanel.js';
@@ -67,6 +67,7 @@ function renderHeader() {
   $('.hdr-ctrls').innerHTML = `
     <label class="lvl" data-tip="Your PMC level – used for the level filter and trader LL estimate">Lvl <input type="number" min="1" max="79" value="${p.settings.level}" data-set="level" aria-label="PMC level"></label>
     <select data-set="faction" aria-label="Faction"><option ${p.settings.faction === 'USEC' ? 'selected' : ''}>USEC</option><option ${p.settings.faction === 'BEAR' ? 'selected' : ''}>BEAR</option></select>
+    <button class="ibtn" data-act="history" aria-label="History / undo" data-tip="History – undo any change">${icon('clock')}</button>
     <button class="ibtn" data-act="theme" aria-label="Toggle light/dark mode" data-tip="Light / dark">${icon(currentTheme() === 'dark' ? 'sun' : 'moon')}</button>
     <button class="ibtn" data-act="settings" aria-label="Settings" data-tip="Settings, backup, data update">${icon('gear')}</button>`;
   const kap = D ? IX.order.filter(n => IX.kappa.has(n) && visible(D.quests[n], p)) : [];
@@ -99,13 +100,13 @@ function render() {
   const main = $('#main');
   const y = window.scrollY;
   const ae = document.activeElement;
-  const focusSel = ae?.matches?.('input[type=search]') ? { f: ae.dataset.f || ae.dataset.af || ae.dataset.if || ae.dataset.tsq, pos: ae.selectionStart } : null;
+  const focusSel = ae?.matches?.('input[type=search]') ? { f: ae.dataset.f || ae.dataset.af || ae.dataset.if || ae.dataset.tsq || ae.dataset.if2, pos: ae.selectionStart } : null;
   const keep = {}; main.querySelectorAll('[data-keep]').forEach(el => { keep[el.dataset.keep] = el.scrollTop; });
   hideTip();
   tab.render(main);
   window.scrollTo(0, y);
   main.querySelectorAll('[data-keep]').forEach(el => { if (keep[el.dataset.keep] != null) el.scrollTop = keep[el.dataset.keep]; });
-  if (focusSel) { const el = main.querySelector(`input[type=search][data-f="${focusSel.f}"],input[type=search][data-af="${focusSel.f}"],input[type=search][data-if="${focusSel.f}"],input[type=search][data-tsq="${focusSel.f}"]`); if (el) { el.focus(); try { el.setSelectionRange(focusSel.pos, focusSel.pos); } catch { } } }
+  if (focusSel) { const el = main.querySelector(`input[type=search][data-f="${focusSel.f}"],input[type=search][data-af="${focusSel.f}"],input[type=search][data-if="${focusSel.f}"],input[type=search][data-tsq="${focusSel.f}"],input[type=search][data-if2="${focusSel.f}"]`); if (el) { el.focus(); try { el.setSelectionRange(focusSel.pos, focusSel.pos); } catch { } } }
   renderHeader();
   if (lastDrawer && document.querySelector('.drawer.open')) { const b = $('.drawer-b'); const s = b.scrollTop; const live = b.querySelector('.live')?.innerHTML; lastDrawer(); const nb = $('.drawer-b'); if (live) { const l = nb.querySelector('.live'); if (l) l.innerHTML = live; } nb.scrollTop = s; }
 }
@@ -118,24 +119,41 @@ function route() {
   $('#main').scrollTop = 0;
 }
 
+// ---------- history ----------
+function openHistory() {
+  const list = store.history;
+  const fmtT = (t) => { const d = new Date(t); const today = new Date().toDateString() === d.toDateString(); return (today ? '' : d.toLocaleDateString() + ' ') + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); };
+  openPanel(`${icon('clock', 'dr-ic')}<span>History</span>`, `
+    <p class="small">Every change in this profile, newest first. <b>Undo</b> reverts that change and everything after it.</p>
+    <div class="hist">${list.map((e, i) => `<div class="hist-row"><span class="hist-t">${fmtT(e.t)}</span><span class="hist-l">${esc(e.label)} <span class="muted small">· ${e.n} change${e.n > 1 ? 's' : ''}</span></span><button class="btn btn-s" data-act="hist-undo" data-i="${i}">Undo${i ? ` (${i + 1})` : ''}</button></div>`).join('') || '<div class="empty small">No changes yet.</div>'}</div>`);
+}
+
 // ---------- actions ----------
 async function toggleQuest(name) {
-  const q = D.quests[name];
   if (!isDone(name)) {
-    undoSnap = snapshot();
     const n = completeQuest(name);
     withUndo(n ? `<b>${esc(name)}</b> done · ${n} earlier quest${n > 1 ? 's' : ''} checked too` : `<b>${esc(name)}</b> done`);
     return;
   }
   const deps = doneDependents(name);
-  if (!deps.length) { uncompleteQuests([name]); return; }
+  const auto = autoChecked(name);
+  if (!deps.length && !auto.quests.length && !auto.tour.length) { uncompleteQuests([name]); withUndo(`<b>${esc(name)}</b> unchecked`); return; }
+  const li = (arr) => `<ul class="dep-list">${arr.slice(0, 30).map(d => `<li>${esc(d)}</li>`).join('')}${arr.length > 30 ? `<li>… +${arr.length - 30}</li>` : ''}</ul>`;
+  const btns = [{ label: 'Cancel', value: null }, { label: 'Only this quest', value: 'one' }];
+  if (auto.quests.length || auto.tour.length) btns.push({ label: `+ ${auto.quests.length} auto-checked`, value: 'auto', primary: !deps.length });
+  if (deps.length) btns.push({ label: `+ ${deps.length} that depend on it`, value: 'deps' });
+  if (deps.length && auto.quests.length) btns.push({ label: 'Both', value: 'both', primary: true, danger: true });
   const v = await confirmDialog({
     title: 'Uncheck quest',
-    bodyHtml: `<p><b>${esc(name)}</b> is a prerequisite for ${deps.length} quest${deps.length > 1 ? 's' : ''} you marked as done:</p><ul class="dep-list">${deps.slice(0, 30).map(d => `<li>${esc(d)}</li>`).join('')}${deps.length > 30 ? `<li>… +${deps.length - 30}</li>` : ''}</ul><p>Reset them too?</p>`,
-    buttons: [{ label: 'Cancel', value: null }, { label: 'Only this quest', value: 'one' }, { label: `Reset all ${deps.length + 1}`, value: 'all', primary: true, danger: true }],
+    bodyHtml: `${auto.quests.length || auto.tour.length ? `<p>These were <b>checked automatically</b> when you ticked <b>${esc(name)}</b>:</p>${li(auto.quests.concat(auto.tour.length ? [`${auto.tour.length} Tour step${auto.tour.length > 1 ? 's' : ''}`] : []))}` : ''}
+      ${deps.length ? `<p>${auto.quests.length ? 'And these' : `<b>${esc(name)}</b> is a prerequisite for these quests you`} marked as done${auto.quests.length ? ' depend on it' : ''}:</p>${li(deps)}` : ''}
+      <p class="small muted">Every change is also in <b>History</b> (clock icon at the top) – you can undo back to any point.</p>`,
+    buttons: btns,
   });
-  if (v === 'one') uncompleteQuests([name]);
-  if (v === 'all') uncompleteQuests([name, ...deps]);
+  if (!v) return;
+  const names = [name, ...(v === 'deps' || v === 'both' ? deps : []), ...(v === 'auto' || v === 'both' ? auto.quests : [])];
+  uncompleteQuests([...new Set(names)], { tour: v === 'auto' || v === 'both' ? auto.tour : [] });
+  withUndo(`${names.length} quest${names.length > 1 ? 's' : ''} unchecked`);
 }
 
 async function toggleObjective(qname, oid) {
@@ -220,14 +238,16 @@ function toggleChObj(cname, oid) {
   if (pr.total && pr.done === pr.total) { toggleChapter(cname, true); }
 }
 
-async function setHideout(mod, level) {
+async function setHideout(mod, level, exact = false) {
   const cur = hLevel(mod);
-  if (level === cur && level > 0) level = level - 1; // clicking the current top pip un-builds it
+  if (!exact && level === cur && level > 0) level = level - 1; // clicking the current top pip un-builds it
+  if (level === cur) return;
+  store.label(`${mod} → level ${level}`);
   if (level > cur) { setModuleLevel(mod, level); toast(`${esc(mod)} → level ${level}`); return; }
   const deps = hideoutDependents(mod, level);
   if (deps.length) {
     const v = await confirmDialog({ title: 'Lower module level', bodyHtml: `<p>These built modules require <b>${esc(mod)}</b> above level ${level}:</p><ul class="dep-list">${deps.map(d => `<li>${esc(d.module)} → level ${d.level}</li>`).join('')}</ul>`, buttons: [{ label: 'Cancel', value: null }, { label: 'Only this module', value: 'one' }, { label: 'Lower them too', value: 'all', primary: true, danger: true }] });
-    if (!v) return;
+    if (!v) { store.label(null); return; }
     store.update(p => { p.hideout[mod] = level; if (v === 'all') for (const d of deps) p.hideout[d.module] = Math.min(p.hideout[d.module] || 0, d.level); });
     return;
   }
@@ -325,7 +345,9 @@ function onClick(e) {
     case 'info-item': (lastDrawer = () => openItemInfo(b.dataset.item))(); break;
     case 'info-mod': (lastDrawer = () => openModuleInfo(b.dataset.m))(); break;
     case 'drawer-close': closeDrawer(); lastDrawer = null; break;
-    case 'undo': if (undoSnap) { const s = JSON.parse(undoSnap); undoSnap = null; store.update(pp => { pp.quests = s.quests; pp.active = s.active || {}; pp.obj = s.obj; pp.ch = s.ch; pp.chObj = s.chObj; pp.settings.choices = s.choices; }); toast('Undone'); } break;
+    case 'undo': { const n = store.undoTo(0); toast(n ? 'Undone' : 'Nothing to undo'); break; }
+    case 'history': hideTip(); (lastDrawer = openHistory)(); break;
+    case 'hist-undo': { const i = +b.dataset.i; const e = store.history[i]; if (!e) break; const n = store.undoTo(i); toast(`${n} change${n > 1 ? 's' : ''} undone – back to before “${esc(e.label)}”`); break; }
     case 'perks': (lastDrawer = openPerks)(); break;
     case 'map': openMap(b.dataset.map, b.dataset.focus || null); break;
     case 'loot-show': hideTip(); openMapLoot(b.dataset.map, b.dataset.item); break;
@@ -354,6 +376,8 @@ function onClick(e) {
     case 'ts-active': store.update(pp => { pp.active = pp.active || {}; if (pp.active[b.dataset.q]) delete pp.active[b.dataset.q]; else pp.active[b.dataset.q] = 1; }); break;
     case 'setll': store.update(pp => { pp.settings.ll = pp.settings.ll || {}; if (b.dataset.l === '') delete pp.settings.ll[b.dataset.t]; else pp.settings.ll[b.dataset.t] = +b.dataset.l; }); break;
     case 'hlevel': setHideout(b.dataset.m, +b.dataset.l); break;
+    case 'ch-start': { const c = b.dataset.c; store.update(pp => { pp.chStart = pp.chStart || {}; if (pp.chStart[c]) delete pp.chStart[c]; else pp.chStart[c] = 1; }, 'progress', `${c}: storyline ${P().chStart?.[c] ? 'not started' : 'started'}`); break; }
+    case 'hcheck': { const m = b.dataset.m, l = +b.dataset.l; setHideout(m, hLevel(m) >= l ? l - 1 : l, true); break; }
     case 'hf': store.setUi('hf', b.dataset.v); render(); break;
     case 'active-setup': (lastDrawer = openActiveSetup)(); break;
     case 'active-apply': {
@@ -377,6 +401,20 @@ function onClick(e) {
     case 'ach': store.update(pp => { const n = b.dataset.a; if (pp.ach[n]) delete pp.ach[n]; else pp.ach[n] = 1; }); break;
     case 'asec': { const f = store.ui.af || { sec: [...new Set(D.achievements.map(x => x.section))].filter(s => !/arena|retired/i.test(s)), status: 'all', q: '' }; const s = new Set(f.sec); s.has(b.dataset.v) ? s.delete(b.dataset.v) : s.add(b.dataset.v); store.setUi('af', { ...f, sec: [...s] }); render(); break; }
     case 'iscope': store.setUi('if', { ...(store.ui.if || {}), scope: b.dataset.v }); render(); break;
+    case 'ifx': { const f = itemFilter(); store.setUi('if2', { ...f, [b.dataset.k]: !f[b.dataset.k] }); render(); break; }
+    case 'ifall': store.setUi('if2', { ...itemFilter(), story: true, quests: true, hideout: true }); render(); break;
+    case 'ifv': store.setUi('if2', { ...itemFilter(), view: b.dataset.v }); render(); break;
+    case 'it-tap': {
+      hideTip();
+      const a = itemList().find(x => x.item === b.dataset.item);
+      if (!a) break;
+      if (a.need === 1) { setItemHave(a, a.have ? 0 : 1); store.setUi('ipop', null); toast(`${esc(a.item)} ${a.have ? 'unticked' : 'ticked'}`); break; }
+      store.setUi('ipop', store.ui.ipop === a.item ? null : a.item); render();
+      setTimeout(() => document.querySelector('.ipop input')?.select(), 30);
+      break;
+    }
+    case 'it-set': { const a = itemList().find(x => x.item === b.dataset.item); if (a) setItemHave(a, +b.dataset.v); break; }
+    case 'it-close': store.setUi('ipop', null); render(); break;
     case 'more': store.setUi(b.dataset.k, (store.ui[b.dataset.k] || 120) + 150); render(); break;
     case 'dismiss-ev': store.setUi('dismissedEvents', [...(store.ui.dismissedEvents || []), b.dataset.k]); renderBanner(); break;
   }
@@ -385,6 +423,8 @@ function onClick(e) {
 let searchT = null;
 function onInput(e) {
   const el = e.target;
+  if (el.dataset.itset != null) { const a = itemList().find(x => x.item === el.dataset.itset); if (a) setItemHave(a, Math.max(0, Math.min(a.need, parseInt(el.value, 10) || 0))); return; }
+  if (el.dataset.if2) { const f = itemFilter(); store.setUi('if2', { ...f, [el.dataset.if2]: el.type === 'checkbox' ? el.checked : el.value }); if (el.type === 'search') { clearTimeout(searchT); searchT = setTimeout(render, 160); } else render(); return; }
   if (el.dataset.tsopt) { tsSet(el.dataset.id, { [el.dataset.tsopt]: el.checked }); render(); return; }
   if (el.dataset.tsmap != null) { tsSet(el.dataset.tsmap, { map: el.value }); render(); return; }
   if (el.dataset.tsq != null) { tsSet(el.dataset.tsq, { q: el.value }); clearTimeout(searchT); searchT = setTimeout(render, 160); return; }
@@ -411,7 +451,7 @@ async function boot() {
   document.addEventListener('click', onSettingsClick);
   document.addEventListener('input', (e) => { if (e.target.matches('input[type=search]')) onInput(e); });
   document.addEventListener('change', (e) => { if (e.target.dataset?.active) { const n = e.target.dataset.active, on = e.target.checked; store.update(pp => { pp.active = pp.active || {}; if (on) pp.active[n] = 1; else delete pp.active[n]; }); return; } if (e.target.dataset?.perk) { togglePerk(e.target.dataset.perk, e.target.checked); return; } if (e.target.matches('select,input[type=checkbox],input[type=number]') && !e.target.id?.startsWith('s-') && !e.target.closest('.mappanel')) { if (e.target.dataset.set === 'faction') store.update(p => { p.settings.faction = e.target.value; }); else onInput(e); } });
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeDrawer(); lastDrawer = null; hideTip(); } });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeDrawer(); lastDrawer = null; hideTip(); if (store.ui.ipop) { store.setUi('ipop', null); render(); } } });
   addEventListener('hashchange', route);
   matchMedia('(prefers-color-scheme: light)').addEventListener?.('change', () => renderHeader());
   store.on((reason) => { render(); if (reason === 'profile' || reason === 'perks') { renderBanner(); } });
