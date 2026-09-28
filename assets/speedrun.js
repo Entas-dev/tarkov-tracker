@@ -1,7 +1,7 @@
 // Speedrun planner: simulates your progression raid by raid and bundles every quest objective
 // (all traders + the Tour story chapter) that can be done on the same map into one raid.
 import { store } from './store.js';
-import { D, IX, P, visible, questStatus, isDone, mapUnlocked, traderUnlocked, traderLL } from './model.js';
+import { D, IX, P, visible, questStatus, isDone, mapUnlocked, traderUnlocked, traderLL, varNeed } from './model.js';
 import { esc, attr, icon, img, traderImg, qlink, itemChip, fmt, progressBar } from './ui.js';
 import { openPanel } from './components.js';
 import { lootData, ensureLoot, lootState, neededLoot, lootForMap, whereText, itemImg, lootItem, bestMaps, mapDisplayName } from './loot.js';
@@ -309,7 +309,7 @@ export function renderSpeedrun(root) {
       ${br.length ? `<div class="raid-bring"><span class="small muted">Bring:</span> ${br.map(b => itemChip(b.item, { count: b.count, small: true })).join('')}</div>` : ''}
       <div class="raid-b">
         ${tourE.length ? `<div class="raid-q tour-q"><div class="raid-qh">${icon('flag')} <b>Tour</b> <span class="small muted">story chapter</span></div><ul class="objs">${tourE.map(e => `<li class="obj"><button class="cb cb-s ${p.chObj['Tour|' + e.o.id] ? 'on' : ''}" data-act="chobj" data-q="Tour" data-o="${e.o.id}" aria-label="Toggle">${icon('check')}</button><span class="obj-t">${e.o.html}</span></li>`).join('')}</ul></div>` : ''}
-        ${Object.entries(byQ).map(([n, objs]) => `<div class="raid-q"><div class="raid-qh">${traderImg(D.quests[n].trader, 'mp-tr')} ${qlink(n)} ${r.turnIns.includes(n) ? '<span class="badge b-av" data-tip="All raid objectives done after this raid – hand it in">finishes</span>' : ''}<button class="ibtn" data-act="info" data-q="${attr(n)}" aria-label="Info">${icon('info')}</button></div>
+        ${Object.entries(byQ).map(([n, objs]) => `<div class="raid-q"><div class="raid-qh">${traderImg(D.quests[n].trader, 'mp-tr')} ${qlink(n)} ${notYet(n, p)}${r.turnIns.includes(n) ? '<span class="badge b-av" data-tip="All raid objectives done after this raid – hand it in">finishes</span>' : ''}<button class="ibtn" data-act="info" data-q="${attr(n)}" aria-label="Info">${icon('info')}</button></div>
           <ul class="objs">${objs.map(o => `<li class="obj"><button class="cb cb-s ${p.obj[n + '|' + o.id] ? 'on' : ''}" data-act="obj" data-q="${attr(n)}" data-o="${o.id}" aria-label="Toggle">${icon('check')}</button><span class="obj-t">${o.html}${o.kind === 'kill' && /\b([5-9]|\d{2,})\b/.test(o.text) ? ' <span class="small muted">(may need more than one raid)</span>' : ''}</span></li>`).join('')}</ul></div>`).join('')}
       </div>
       ${lt.length ? `<div class="raid-loot"><div class="raid-lh">${icon('box')} <span class="small"><b>Grab on ${esc(r.map)}</b> – items you still need for quests / hideout that spawn here</span></div>
@@ -320,6 +320,14 @@ export function renderSpeedrun(root) {
   }).join('') || '<div class="empty">Nothing to plan – every available quest objective is done, or the next quests need a higher level / trader loyalty.</div>'}</ol>
   ${lootPlanHtml(plan, needs, raidLoot, ld)}
   <p class="small muted">How it's planned: from your ticked progress the planner simulates raid by raid. Each raid picks the map where you can do the most objectives, preferring Tour steps (they unlock traders and maps) and objectives that finish a quest. After each raid it hands in finished quests and estimates your level from quest EXP plus the EXP-per-raid setting. Objectives that allow several maps are assigned to one of them. When two maps are about equal, the one where more of your needed items can spawn wins. Item spawns: loose-loot spots and container positions from tarkov.dev, container contents from the wiki loot tables – spawns are random, so this tells you where your odds are best, not where an item is guaranteed. Computed in ${ms} ms.</p>`;
+}
+
+// quest that is not unlocked in your game yet – the plan expects it to open after earlier hand-ins / level-ups
+function notYet(n, p) {
+  const st = questStatus(D.quests[n], p);
+  if (st.s !== 'locked') return '';
+  const why = st.reasons.map(r => r.k === 'var' ? `after ${varNeed(r.x, p)} more finished ${r.x.trader} LL${r.x.tier} task${varNeed(r.x, p) > 1 ? 's' : ''} (e.g. the hand-ins before this raid)` : r.k === 'level' ? `at PMC level ${r.v}` : r.k === 'll' ? `at ${r.v.trader} LL${r.v.level}` : r.k === 'pre' ? `after ${r.g.map(a => a.q).join(' or ')}` : r.k === 'tour' || r.k === 'start' ? 'after the Tour steps' : r.k === 'map' ? 'when the map is unlocked' : r.k === 'chapter' ? `after the ${r.c.ch} step` : '').filter(Boolean);
+  return `<span class="badge b-lock" data-tip="${attr('Not in your task list yet – unlocks ' + (why.join(', ') || 'during the plan') + '. Hand in the earlier quests first.')}">${icon('lock')}unlocks first</span>`;
 }
 
 // ---------- loot ----------

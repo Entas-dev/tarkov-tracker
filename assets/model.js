@@ -246,23 +246,26 @@ export function traderLL(trader, p = P()) {
   return ll;
 }
 
-// Loyalty-group counter (patch 1.1): side tasks of a trader LL unlock in groups. The game raises a hidden counter
-// per trader LL; we estimate it from what you did: the first group opens when you reach the LL, every finished
-// task of that LL counts one up, reaching the next LL opens the next group – and quests you have open or finished
-// prove the counter reached their threshold.
+// Loyalty-group counter (patch 1.1): side tasks of a trader LL unlock in groups. The game counts the tasks you
+// finished at that trader LL – including the chain / intro tasks that have no group of their own (e.g. Mechanic's
+// Gunsmith - MP-133 opens his LL1 group 1, Prapor's Debut opens his). Reaching the next LL opens the next group.
+// Quests you have open or finished prove the counter reached their threshold.
+const tierOf = (q) => (q.vars?.length ? q.vars[0].tier : q.ll?.level || 1);
 export function varValue(id, p = P()) {
   const info = IX.vars?.[id];
   if (!info) return Infinity;
-  let ev = 0, done = 0;
+  let ev = 0;
   for (const n of info.quests) {
     const x = D.quests[n].vars.find(v => v.v === id);
-    if (isDone(n, p)) { done++; ev = Math.max(ev, x.min); } else if (p.active?.[n]) ev = Math.max(ev, x.min);
+    if (isDone(n, p) || p.active?.[n]) ev = Math.max(ev, x.min);
   }
   const ll = traderLL(info.trader, p);
   if (ll < info.tier) return ev;
+  let done = 0;
+  for (const n of IX.byTrader?.[info.trader] || []) { const q = D.quests[n]; if (tierOf(q) === info.tier && isDone(n, p) && visible(q, p)) done++; }
   const gs = info.groups;
-  let est = gs[0] + done;
-  if (ll > info.tier) { const idx = gs.filter(t => t <= est).length - 1; est = Math.max(est, gs[Math.min(gs.length - 1, Math.max(0, idx) + (ll - info.tier))]); }
+  let est = done;
+  if (ll > info.tier) { const idx = gs.filter(t => t <= est).length - 1; est = Math.max(est, gs[Math.min(gs.length - 1, idx + (ll - info.tier))]); }
   return Math.max(ev, est);
 }
 export const chReqMet = (c, p = P()) => !!p.ch[c.ch] || c.oids.some(id => p.chObj[`${c.ch}|${id}`]);
