@@ -75,7 +75,7 @@ function renderHeader() {
 }
 
 function renderFooter() {
-  $('.foot').innerHTML = D ? `Data: <a href="https://escapefromtarkov.fandom.com" target="_blank" rel="noopener">EFT Wiki</a> (CC BY-SA) · updated ${ageText(D)} · ${Object.keys(D.quests).length} quests · <button class="linkbtn" data-act="refresh">Update from wiki now</button> · Map data: <a href="https://tarkov.dev" target="_blank" rel="noopener">tarkov.dev</a> · Progress is stored in this browser only – use Settings → Export for backups.` : '';
+  $('.foot').innerHTML = D ? `Data: <a href="https://escapefromtarkov.fandom.com" target="_blank" rel="noopener">EFT Wiki</a> (CC BY-SA) · updated ${ageText(D)} · ${Object.keys(D.quests).length} quests · <button class="linkbtn" data-act="refresh">Update from wiki now</button> · Map data: <a href="https://tarkov.dev" target="_blank" rel="noopener">tarkov.dev</a> · Progress is stored in this browser only – use Settings → Export for backups. · Site version: ${(() => { const d = new Date(document.lastModified); return isNaN(d) ? '–' : d.toLocaleString(); })()}` : '';
 }
 
 function renderBanner() {
