@@ -47,7 +47,13 @@ export function chapterStart(c) {
   const maps = [...new Set(linksIn(txt).filter(t => IX.maps.includes(t)))];
   const keys = [...new Set(linksIn(txt).filter(t => /key|keycard/i.test(D.items[t]?.type || '') || /\bkey(card)?\b/i.test(t) && D.items[t]))];
   const first = (c.reqHtml || []).find(r => r && !/^File:/i.test(r)) || '';
-  return (c._start = { maps, keys, html: first, tour: /data-t="Tour"/.test(txt), ic: (txt.match(/Intelligence Center level (\d)/i) || [])[1] });
+  // keys that belong to the spot on a given map (the unlock text lists one line per location)
+  const keysByMap = {}, htmlByMap = {};
+  for (const line of c.reqHtml || []) {
+    const ls = linksIn(line);
+    for (const m of ls.filter(t => IX.maps.includes(t))) { keysByMap[m] = [...new Set([...(keysByMap[m] || []), ...ls.filter(t => keys.includes(t))])]; htmlByMap[m] = htmlByMap[m] ? htmlByMap[m] + '<br>' + line : line; }
+  }
+  return (c._start = { maps, keys, keysByMap, htmlByMap, html: first, tour: /data-t="Tour"/.test(txt), ic: (txt.match(/Intelligence Center level (\d)/i) || [])[1] });
 }
 function preOk(c, sp) { return (c.prereq || []).every(g => g.some(a => (D.chapters[a.q] ? !!sp.ch[a.q] : !!sp.quests[a.q]))); }
 export function chapterStarted(c, sp) {
@@ -257,7 +263,7 @@ function bringList(r) {
   const items = {}, wear = {}, keys = {};
   const isKey = (n) => /key|keycard/i.test(D.items[n]?.type || '') || /\bkey(card)?\b/i.test(n);
   for (const e of r.entries) {
-    if (e.kind === 'start') { for (const k of chapterStart(D.chapters[e.c]).keys) keys[k] = keys[k] || { item: k, count: 1, alt: true }; continue; }
+    if (e.kind === 'start') { const st = chapterStart(D.chapters[e.c]); const ks = st.keysByMap[r.map] || []; for (const k of ks) keys[k] = keys[k] || { item: k, count: 1, alt: ks.length > 1 }; continue; }
     const o = e.o;
     for (const it of o.items || []) {
       const I = D.items[it.item];
@@ -377,7 +383,7 @@ export function renderSpeedrun(root) {
         <button class="btn btn-s" data-act="map" data-map="${attr(r.map)}">${icon('map')} Map</button></div>
       ${br.items.length || br.wear.length || br.keys.length ? `<div class="raid-bring">${br.items.length ? `<span class="small muted">Bring:</span> ${br.items.map(b => itemChip(b.item, { count: b.count, small: true })).join('')}` : ''}${br.wear.length ? ` <span class="small muted">Wear / use:</span> ${br.wear.map(b => itemChip(b.item, { small: true })).join('')}` : ''}${br.keys.length ? ` <span class="small muted">Keys:</span> ${br.keys.map(b => itemChip(b.item, { small: true })).join('')}${br.keys.some(k => k.alt) ? ' <span class="small muted">(one of them)</span>' : ''}` : ''}</div>` : ''}
       <div class="raid-b">
-        ${startE.map(e => { const c = D.chapters[e.c]; const st = chapterStart(c); return `<div class="raid-q story-q"><div class="raid-qh">${chIcon(e.c)} <b>Start storyline: ${esc(e.c)}</b><button class="ibtn" data-act="info-ch" data-c="${attr(e.c)}" aria-label="Guide">${icon('info')}</button></div><div class="small">${st.html}</div><button class="btn btn-s ${chapterStarted(c, p) ? 'on' : ''}" data-act="ch-start" data-c="${attr(e.c)}">${chapterStarted(c, p) ? 'Started ✓' : 'I picked it up – mark as started'}</button></div>`; }).join('')}
+        ${startE.map(e => { const c = D.chapters[e.c]; const st = chapterStart(c); return `<div class="raid-q story-q"><div class="raid-qh">${chIcon(e.c)} <b>Start storyline: ${esc(e.c)}</b><button class="ibtn" data-act="info-ch" data-c="${attr(e.c)}" aria-label="Guide">${icon('info')}</button></div><div class="small">${st.html}${st.htmlByMap[r.map] && st.htmlByMap[r.map] !== st.html ? `<br>${st.htmlByMap[r.map]}` : ''}</div><button class="btn btn-s ${chapterStarted(c, p) ? 'on' : ''}" data-act="ch-start" data-c="${attr(e.c)}">${chapterStarted(c, p) ? 'Started ✓' : 'I picked it up – mark as started'}</button></div>`; }).join('')}
         ${Object.entries(byC).map(([c, objs]) => `<div class="raid-q story-q"><div class="raid-qh">${chIcon(c)} <b>${esc(c)}</b> <span class="small muted">story chapter</span><button class="ibtn" data-act="info-ch" data-c="${attr(c)}" aria-label="Guide">${icon('info')}</button></div><ul class="objs">${objs.map(o => `<li class="obj"><button class="cb cb-s ${p.chObj[c + '|' + o.id] ? 'on' : ''}" data-act="chobj" data-q="${attr(c)}" data-o="${o.id}" aria-label="Toggle">${icon('check')}</button><span class="obj-t">${o.html}</span></li>`).join('')}</ul></div>`).join('')}
         ${Object.entries(byQ).map(([n, objs]) => `<div class="raid-q"><div class="raid-qh">${traderImg(D.quests[n].trader, 'mp-tr')} ${qlink(n)} ${notYet(n, p)}${r.turnIns.includes(n) ? '<span class="badge b-av" data-tip="All raid objectives done after this raid – hand it in">finishes</span>' : ''}<button class="ibtn" data-act="info" data-q="${attr(n)}" aria-label="Info">${icon('info')}</button></div>
           <ul class="objs">${objs.map(o => `<li class="obj"><button class="cb cb-s ${p.obj[n + '|' + o.id] ? 'on' : ''}" data-act="obj" data-q="${attr(n)}" data-o="${o.id}" aria-label="Toggle">${icon('check')}</button><span class="obj-t">${o.html}${o.kind === 'kill' && /\b([5-9]|\d{2,})\b/.test(o.text) ? ' <span class="small muted">(may need more than one raid)</span>' : ''}</span></li>`).join('')}</ul></div>`).join('')}

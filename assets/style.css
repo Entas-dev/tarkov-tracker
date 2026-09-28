@@ -768,7 +768,8 @@ input[type=number], input[type=search], select { background: var(--bg2); border-
 .ig-t.p3 { border-color: color-mix(in srgb, var(--accent) 75%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent); }
 .ig-t.sel { outline: 2px solid var(--sel-bg); outline-offset: 1px; }
 .ig-t.got { opacity: .45; }
-.ig-img { width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+.ig-t { overflow: hidden; }
+.ig-img { position: absolute; inset: 4px; width: calc(100% - 8px); height: calc(100% - 8px); object-fit: contain; pointer-events: none; }
 .ig-n { position: absolute; right: 3px; bottom: 1px; font: 700 17px/1 var(--font-h); color: #fff; text-shadow: 0 0 3px #000, 0 0 2px #000, 1px 1px 0 #000; }
 .ig-n .ic { width: 18px; height: 18px; color: var(--ok); stroke-width: 3; }
 .ig-fir { position: absolute; left: 2px; top: 2px; font: 700 10px/1 var(--font-h); color: #fff; background: var(--bad); padding: 1px 3px; }
