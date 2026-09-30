@@ -1,6 +1,6 @@
 // Story, Kappa, Traders, All quests tabs
 import { store } from './store.js';
-import { D, IX, P, ENDINGS, condStatus, traderUnlocked, visible, questStatus, isDone, chDone, chapterProgress, chapterClosure, traderLL, questNeeds, isSeasonal, requiredChapters } from './model.js';
+import { D, IX, P, ENDINGS, condStatus, traderUnlocked, visible, questStatus, isDone, chDone, chapterProgress, chapterClosure, traderLL, questNeeds, isSeasonal, requiredChapters, staleAutoTicks } from './model.js';
 import { esc, attr, icon, img, traderImg, qlink, itemChip, progressBar, fmt, statusBadge } from './ui.js';
 import { questCard, objectiveRows, needsBlock, mapChips, expanded } from './components.js';
 import { perksNotesHtml } from './perks.js';
@@ -143,6 +143,7 @@ export function renderKappa(root) {
       <div><div class="sub-h">Items to hand over <span class="muted">(${colHave}/${colNeeds.length})</span></div><div class="chips cgrid">${colNeeds.map(n => itemChip(n.item, { count: n.count, have: n.have, fir: n.fir, counter: `Collector|${n.item}` })).join('')}</div></div>
     </div>
   </section>` : ''}
+  ${staleNotice()}
   ${taskScreen({ id: 'kappa', names: kap, group: 'trader', showKappaToggle: false })}`;
 }
 
@@ -171,6 +172,7 @@ export function renderTraders(root) {
     ${T.ll?.length && sel !== 'Fence' ? `<div class="tr-llsel"><span class="muted">Loyalty</span>${[1, ...T.ll.map(r => r.level)].map(l => { const r = T.ll.find(x => x.level === l); return `<button class="tr-llb ${ll === l ? 'on' : ''}" data-act="setll" data-t="${attr(sel)}" data-l="${l}" data-tip="${attr(l === 1 ? 'LL1' : `LL${l}: PMC level ${r?.pmcLevel ?? '–'}, reputation ${r?.rep ?? '–'}`)}">${ROMAN[l]}</button>`; }).join('')}<span class="small muted">${manual ? `set by you · <button class="linkbtn" data-act="setll" data-t="${attr(sel)}" data-l="">auto</button>` : 'estimated from your level'}</span></div>` : ''}
     ${T.notesHtml?.length ? `<details class="tr-notes"><summary>Notes</summary><ul>${T.notesHtml.map(n => `<li>${n}</li>`).join('')}</ul></details>` : ''}
   </div>
+  ${staleNotice()}
   ${taskScreen({ id: 'tr-' + sel, names: IX.byTrader[sel] || [], group: 'll' })}`;
 }
 
@@ -183,5 +185,14 @@ export function renderQuests(root) {
   root.innerHTML = `
   <div class="tab-head"><div><h1>All Quests</h1><p class="lede">${all.length} quests for this profile · <b>${avail}</b> available right now at level ${p.settings.level}. <button class="btn btn-s" data-act="active-setup">Set my open quests</button></p></div>
     <div class="head-stat">${progressBar(done, all.length, 'All quests')}</div></div>
+  ${staleNotice(p)}
   ${taskScreen({ id: 'all', names: IX.order, group: 'trader' })}`;
+}
+
+// quests an older version ticked automatically although nothing requires them
+export function staleNotice(p = P()) {
+  const st = staleAutoTicks(p);
+  if (!st.length) return '';
+  return `<div class="notice sr-stale">${icon('info')}<div><b>${st.length} quest${st.length > 1 ? 's were' : ' was'} ticked automatically by an older rule</b>, although the quest you ticked does not require ${st.length > 1 ? 'them' : 'it'} (outdated wiki links): ${st.slice(0, 12).map(o => `${esc(o.q)} <span class="muted small">(via ${esc(o.by)})</span>`).join(', ')}${st.length > 12 ? ` +${st.length - 12}` : ''}.
+    <div class="as-actions"><button class="btn btn-s btn-p" data-act="stale-fix">Uncheck ${st.length > 1 ? 'them' : 'it'}</button><button class="btn btn-s" data-act="stale-keep">I really did ${st.length > 1 ? 'them' : 'it'} – keep</button></div></div></div>`;
 }

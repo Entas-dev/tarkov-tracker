@@ -463,6 +463,23 @@ export function completeQuest(name) {
   return add.length;
 }
 
+// quests an older, too eager rule ticked automatically: ticked because of quest X, but X does not require them
+// (outdated wiki links, name series like "The Huntsman Path - …"). Only quests the tracker recorded as auto-ticked.
+export function staleAutoTicks(p = P()) {
+  const out = [];
+  const cache = {};
+  for (const [k, by] of Object.entries(p.autoBy || {})) {
+    if (!D.quests[k] || !p.quests[k] || !D.quests[by]) continue;
+    const cl = cache[by] || (cache[by] = prerequisiteClosure(by, { ...p, quests: {} }));
+    // still required by some other ticked quest? then it is fine
+    if (cl.has(k)) continue;
+    out.push({ q: k, by });
+  }
+  if (!out.length) return out;
+  const need = new Set();
+  for (const n of Object.keys(p.quests)) if (p.quests[n] && D.quests[n] && !out.some(o => o.q === n)) for (const m of prerequisiteClosure(n, { ...p, quests: {} })) need.add(m);
+  return out.filter(o => !need.has(o.q));
+}
 // quests (and Tour steps) that were checked automatically when `name` was ticked and are not needed by anything else still done
 export function autoChecked(name, p = P()) {
   const auto = Object.entries(p.autoBy || {}).filter(([k, v]) => v === name).map(([k]) => k);

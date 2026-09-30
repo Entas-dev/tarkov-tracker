@@ -1,6 +1,6 @@
 // App bootstrap, header, routing, global actions
 import { store, PROFILES } from './store.js';
-import { D, IX, setDataset, P, visible, isDone, completeQuest, autoChecked, setItemHave, prerequisiteClosure, tourStepsFor, applyActiveQuests, doneDependents, uncompleteQuests, questObjProgress, objKey, chapterClosure, chDone, chapterProgress, hLevel, setModuleLevel, hideoutDependents, objVisibleForEnding, objApplies, condStatus, questStatus } from './model.js';
+import { D, IX, setDataset, P, visible, isDone, completeQuest, autoChecked, setItemHave, prerequisiteClosure, tourStepsFor, applyActiveQuests, doneDependents, uncompleteQuests, questObjProgress, objKey, chapterClosure, chDone, chapterProgress, hLevel, setModuleLevel, hideoutDependents, objVisibleForEnding, objApplies, condStatus, questStatus, staleAutoTicks } from './model.js';
 import { esc, attr, icon, img, initTooltips, hideTip, confirmDialog, toast, $, $$ } from './ui.js';
 import { expanded, openQuestInfo, openChapterInfo, openItemInfo, openWikiPage, openModuleInfo, closeDrawer, openPanel } from './components.js';
 import { renderStory, renderKappa, renderTraders, renderQuests } from './tabs-quests.js';
@@ -396,6 +396,8 @@ function onClick(e) {
       withUndo(`${n} open quest${n > 1 ? 's' : ''} set · ${after} quests now marked done${b.dataset.mode === 'merge' ? ` (+${Math.max(0, after - before)})` : ''}${info.strict ? ` · ${info.strict} not in your task list → finished` : ''}${info.level ? ` · level set to ${info.level}` : ''}${info.ll?.length ? ` · ${info.ll.join(', ')} set` : ''} · Speedrun plan updated`);
       break;
     }
+    case 'stale-fix': { const st = staleAutoTicks(); if (!st.length) break; uncompleteQuests(st.map(o => o.q), { label: `${st.length} wrongly auto-ticked quests unchecked` }); withUndo(`${st.length} quest${st.length > 1 ? 's' : ''} unchecked`); break; }
+    case 'stale-keep': store.update(pp => { for (const o of staleAutoTicks(pp)) delete pp.autoBy[o.q]; }, 'progress', 'Kept auto-ticked quests'); break;
     case 'active-clear': store.update(pp => { pp.active = {}; }); break;
     case 'sr': store.setUi('sr', { ...(store.ui.sr || { n: 10, exp: 4000 }), [b.dataset.k]: +b.dataset.v }); render(); break;
     case 'sr-recalc': recalcSpeedrun(); render(); toast('Speedrun plan recalculated from your current progress'); break;
