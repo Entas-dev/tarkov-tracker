@@ -47,6 +47,15 @@ function buildIndexes() {
       if (q.vars.length) { if (q.llWiki === undefined) q.llWiki = q.ll || null; q.ll = { trader: q.vars[0].trader, level: q.vars[0].tier, fromGame: true }; }
       else if (g.ll?.length) { if (q.llWiki === undefined) q.llWiki = q.ll || null; q.ll = { trader: g.ll[0][0], level: g.ll[0][1], fromGame: true }; }
     } else if (!q.minLevel && g.lvl) q.minLevel = g.lvl;
+    if (v2 && (g.req || []).every(r => Q[r.q])) {
+      // Since patch 1.1 most side tasks unlock through loyalty groups instead of a previous quest. The game files list
+      // the real previous quests – wiki "previous" / "leads to" links the game does not have are outdated and would
+      // make ticking a quest also tick quests you never did. (Only when every game prerequisite exists on the wiki –
+      // otherwise the game data points at renamed / removed quests and the wiki links stay.)
+      const gst = new Map((g.req || []).map(r => [r.q, r.st || []]));
+      q.preWiki = q.pre;
+      q.pre = q.pre.map(gr => gr.filter(a => gst.has(a.q)).map(a => { const st = gst.get(a.q); return { ...a, type: st.includes('active') ? 'accept' : st.includes('failed') && !st.includes('complete') ? 'fail' : 'complete' }; })).filter(gr => gr.length);
+    }
     for (const r of g.req || []) {
       if (!Q[r.q] || r.q === q.name || q.pre.some(gr => gr.some(a => a.q === r.q))) continue;
       const st = r.st || [];
@@ -54,6 +63,25 @@ function buildIndexes() {
       q.pre.push([{ q: r.q, type, fromGame: true }]);
     }
   }
+  // cycles (the game files contain two tasks called "Make Amends", so the chain would point back at itself):
+  // quests on a cycle keep their wiki links; game-only links that still close a cycle are dropped
+  const cycles = () => {
+    const st = {}, stack = [], hit = new Set();
+    const dfs = (n) => {
+      st[n] = 1; stack.push(n);
+      for (const g of Q[n].pre) for (const a of g) { if (!Q[a.q]) continue; if (st[a.q] === 1) { for (let i = stack.indexOf(a.q); i < stack.length; i++) hit.add(stack[i]); } else if (!st[a.q]) dfs(a.q); }
+      stack.pop(); st[n] = 2;
+    };
+    for (const n of Object.keys(Q)) if (!st[n]) dfs(n);
+    return hit;
+  };
+  let cyc = cycles();
+  if (cyc.size) {
+    for (const n of cyc) if (Q[n].preWiki) Q[n].pre = Q[n].preWiki.map(g => g.slice());
+    cyc = cycles();
+    for (const n of cyc) Q[n].pre = Q[n].pre.map(g => g.filter(a => !(a.fromGame && cyc.has(a.q)))).filter(g => g.length);
+  }
+  IX.cycleFixed = [...cyc];
   // traders unlocked by a quest (Jaeger ← Introduction, Ref ← Easy Money - Part 1, BTR Driver ← accept A Helping Hand)
   for (const [tn, T] of Object.entries(D.traders || {})) {
     const u = T.unlockQuest;
@@ -115,7 +143,8 @@ function buildIndexes() {
     if (members.length < 2) continue;
     const part = (q) => { const m = q.name.match(/ - Part (\d+)$/i); return m ? +m[1] : null; };
     const allPart = members.every(q => part(q) != null);
-    const ord = (q) => (allPart ? part(q) : lvlOf(q));
+    if (!allPart) continue; // only numbered series ("… - Part 3"); name groups like "The Huntsman Path - …" are no chain
+    const ord = (q) => part(q);
     for (const m of members) {
       const o = ord(m);
       if (!o) continue;
@@ -204,13 +233,16 @@ function buildIndexes() {
   const chDeps = {};
   for (const c of Object.values(CH)) {
     const deps = new Set(c.prereq.flat().map(a => a.q).filter(n => CH[n]));
-    for (const h of c.reqHtml) for (const m of h.matchAll(/data-t="([^"]+)"/g)) if (CH[m[1]] && m[1] !== c.name) deps.add(m[1]);
+    // "…while progressing through the story chapter Tour": Tour runs in parallel, it does not have to be finished first
+    for (const h of c.reqHtml) for (const m of h.matchAll(/data-t="([^"]+)"/g)) if (CH[m[1]] && m[1] !== c.name && m[1] !== 'Tour') deps.add(m[1]);
+    deps.delete('Tour');
     chDeps[c.name] = deps;
   }
-  for (const c of Object.values(CH)) for (const l of c.leadsTo) if (CH[l]) chDeps[l].add(c.name);
-  if (CH['Tour']) for (const n of chNames) if (n !== 'Tour') chDeps[n].add('Tour');
+  for (const c of Object.values(CH)) for (const l of c.leadsTo) if (CH[l] && c.name !== 'Tour') chDeps[l].add(c.name);
+  // display order only: Tour first, then by dependency depth (no completion dependency on Tour)
+  const ordDeps = Object.fromEntries(chNames.map(n => [n, new Set([...chDeps[n], ...(CH['Tour'] && n !== 'Tour' ? ['Tour'] : [])])]));
   const chDepth = {};
-  const dd = (n, seen = new Set()) => { if (chDepth[n] != null) return chDepth[n]; if (seen.has(n)) return 0; seen.add(n); let d = 0; for (const p of chDeps[n]) d = Math.max(d, dd(p, seen) + 1); return (chDepth[n] = d); };
+  const dd = (n, seen = new Set()) => { if (chDepth[n] != null) return chDepth[n]; if (seen.has(n)) return 0; seen.add(n); let d = 0; for (const p of ordDeps[n]) d = Math.max(d, dd(p, seen) + 1); return (chDepth[n] = d); };
   chNames.forEach(n => dd(n));
   IX.chDeps = chDeps;
   IX.chapterOrder = chNames.sort((a, b) => (a === 'The Ticket') - (b === 'The Ticket') || (a === 'Tour' ? -1 : b === 'Tour' ? 1 : 0) || chDepth[a] - chDepth[b] || a.localeCompare(b));
@@ -236,6 +268,8 @@ export function visible(q, p = P()) {
 
 export const isDone = (name, p = P()) => !!p.quests[name];
 
+export const llIsManual = (trader, p = P()) => p.settings.ll?.[trader] != null && p.settings.ll[trader] !== '';
+export function llNote(trader, p = P()) { return llIsManual(trader, p) ? `yours: ${traderLL(trader, p)}` : `estimated ${traderLL(trader, p)} from your PMC level – set your real LL under Traders`; }
 export function traderLL(trader, p = P()) {
   const manual = p.settings.ll?.[trader];
   if (manual != null && manual !== '') return +manual;
@@ -248,25 +282,32 @@ export function traderLL(trader, p = P()) {
 
 // Loyalty-group counter (patch 1.1): side tasks of a trader LL unlock in groups. The game counts the tasks you
 // finished at that trader LL – including the chain / intro tasks that have no group of their own (e.g. Mechanic's
-// Gunsmith - MP-133 opens his LL1 group 1, Prapor's Debut opens his). Reaching the next LL opens the next group.
-// Quests you have open or finished prove the counter reached their threshold.
+// Gunsmith - MP-133 opens his LL1 group 1, Prapor's Debut opens his).
+// Only real ticks count: finished tasks of that trader LL, or a quest of the group that you ticked as done / open
+// (proof that the game's counter reached its threshold). No estimates from your loyalty level.
 const tierOf = (q) => (q.vars?.length ? q.vars[0].tier : q.ll?.level || 1);
-export function varValue(id, p = P()) {
+export function varInfo(id, p = P()) {
   const info = IX.vars?.[id];
-  if (!info) return Infinity;
-  let ev = 0;
+  if (!info) return null;
+  let ev = 0, evQ = null;
   for (const n of info.quests) {
     const x = D.quests[n].vars.find(v => v.v === id);
-    if (isDone(n, p) || p.active?.[n]) ev = Math.max(ev, x.min);
+    if ((isDone(n, p) || p.active?.[n]) && x.min > ev) { ev = x.min; evQ = n; }
   }
-  const ll = traderLL(info.trader, p);
-  if (ll < info.tier) return ev;
   let done = 0;
   for (const n of IX.byTrader?.[info.trader] || []) { const q = D.quests[n]; if (tierOf(q) === info.tier && isDone(n, p) && visible(q, p)) done++; }
-  const gs = info.groups;
-  let est = done;
-  if (ll > info.tier) { const idx = gs.filter(t => t <= est).length - 1; est = Math.max(est, gs[Math.min(gs.length - 1, idx + (ll - info.tier))]); }
-  return Math.max(ev, est);
+  return { done, ev, evQ, value: Math.max(ev, done) };
+}
+export function varValue(id, p = P()) { const v = varInfo(id, p); return v ? v.value : Infinity; }
+// requirement row text: "Therapist LL1 tasks finished 2/3" (+ why it counts as met)
+export function varText(x, p = P()) {
+  const v = varInfo(x.v, p);
+  if (!v) return { ok: true, html: '' };
+  const ok = v.value >= x.min;
+  const tr = x.trader;
+  const h = (t) => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const why = ok && v.done < x.min ? ` <span class="muted">– counts as unlocked because you ticked “${h(v.evQ)}” as ${isDone(v.evQ, p) ? 'done' : 'open'}</span>` : !ok ? ` <span class="muted">– ${x.min - v.done} more to finish</span>` : '';
+  return { ok, html: `${h(tr)} LL${x.tier} tasks finished: ${v.done}/${x.min}${why}` };
 }
 export const chReqMet = (c, p = P()) => !!p.ch[c.ch] || c.oids.some(id => p.chObj[`${c.ch}|${id}`]);
 export function varNeed(x, p = P()) { return Math.max(0, x.min - varValue(x.v, p)); }
@@ -277,11 +318,18 @@ export function groupSatisfied(g, p = P()) {
     if (!q) return true;
     if (!visible(q, p)) return true; // not applicable to this profile
     if (a.type === 'complete' || a.type === 'fail') return isDone(a.q, p);
-    if (a.type === 'accept') return isDone(a.q, p) || prereqsMet(q, p);
+    // "accept X": X must at least be unlocked (open in your list or available), not only its previous quests done
+    if (a.type === 'accept') return isDone(a.q, p) || !!p.active?.[a.q] || acceptable(q, p);
     return isDone(a.q, p);
   });
 }
 export const prereqsMet = (q, p = P()) => preOf(q).every(g => groupSatisfied(g, p));
+let accDepth = 0;
+function acceptable(q, p) {
+  if (accDepth > 6) return prereqsMet(q, p);
+  accDepth++;
+  try { return questStatus(q, p).s === 'available'; } finally { accDepth--; }
+}
 
 export function questStatus(q, p = P()) {
   if (isDone(q.name, p)) return { s: 'done', reasons: [] };
@@ -607,7 +655,7 @@ export function shoppingList({ scope = 'all', includeCurrency = false, includeQu
 // ---------- items for any combination of goals (Needed Items tab) ----------
 // chapters you need for your ending: The Ticket, its prerequisites and the chapters its objectives point to
 export function requiredChapters(ending = P().settings.ending || 'Savior', p = P()) {
-  const req = new Set(['The Ticket', ...chapterClosure('The Ticket')]);
+  const req = new Set(['The Ticket', ...chapterClosure('The Ticket'), ...(D.chapters?.['Tour'] ? ['Tour'] : [])]);
   const t = D.chapters?.['The Ticket'];
   if (t) for (const o of t.objectives) if (!o.endings || o.endings.includes(ending)) for (const m of (o.html + (o.cond || '')).matchAll(/data-t="([^"]+)"/g)) if (D.chapters[m[1]]) { req.add(m[1]); for (const d of chapterClosure(m[1])) req.add(d); }
   return req;

@@ -1,6 +1,6 @@
 // Story, Kappa, Traders, All quests tabs
 import { store } from './store.js';
-import { D, IX, P, ENDINGS, condStatus, traderUnlocked, visible, questStatus, isDone, chDone, chapterProgress, chapterClosure, traderLL, questNeeds, isSeasonal } from './model.js';
+import { D, IX, P, ENDINGS, condStatus, traderUnlocked, visible, questStatus, isDone, chDone, chapterProgress, chapterClosure, traderLL, questNeeds, isSeasonal, requiredChapters } from './model.js';
 import { esc, attr, icon, img, traderImg, qlink, itemChip, progressBar, fmt, statusBadge } from './ui.js';
 import { questCard, objectiveRows, needsBlock, mapChips, expanded } from './components.js';
 import { perksNotesHtml } from './perks.js';
@@ -15,8 +15,7 @@ export function renderStory(root) {
   const ending = p.settings.ending || 'Savior';
   const E = D.endings?.endings || {};
   const ticket = D.chapters['The Ticket'];
-  const required = new Set(['The Ticket', ...chapterClosure('The Ticket')]);
-  if (ticket) for (const o of ticket.objectives) if (!o.endings || o.endings.includes(ending)) for (const m of (o.html + (o.cond || '')).matchAll(/data-t="([^"]+)"/g)) if (D.chapters[m[1]]) { required.add(m[1]); for (const d of chapterClosure(m[1])) required.add(d); }
+  const required = requiredChapters(ending, p);
   const order = IX.chapterOrder;
   const reqDone = order.filter(c => required.has(c) && chDone(c, p)).length;
   const reqTotal = order.filter(c => required.has(c)).length;

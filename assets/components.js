@@ -1,5 +1,5 @@
 // Quest cards, objective lists, info drawer
-import { D, IX, P, visible, condStatus, traderUnlocked, questMapsUnlocked, questStatus, isDone, questNeeds, questObjProgress, objDone, cntKey, isSeasonal, preOf, traderLL, varNeed, chReqMet } from './model.js';
+import { D, IX, P, visible, condStatus, traderUnlocked, questMapsUnlocked, questStatus, isDone, questNeeds, questObjProgress, objDone, cntKey, isSeasonal, preOf, traderLL, llNote, varNeed, varText, chReqMet } from './model.js';
 import { esc, attr, icon, img, traderImg, qlink, itemChip, statusBadge, wikiHref, wikiSectionHtml, fmt, progressBar } from './ui.js';
 import { lootData, lootState, ensureLoot, itemIndex, lootItem, itemImg, bestMaps, whereText, itemContainers, mapDisplayName } from './loot.js';
 
@@ -121,8 +121,8 @@ export function openQuestInfo(name) {
   { const ms = (q.maps || []).filter(Boolean); if (ms.length && ms.every(m => IX.mapGates?.[m])) { const first = ms.slice().sort((a, b) => IX.mapGates[a].idx - IX.mapGates[b].idx)[0]; reqs.push(`Access to ${esc(ms.join(' or '))} – Tour step <b>${esc(IX.mapGates[first].step)}</b> ${questMapsUnlocked(q, p) ? '<span class="t-ok">✓</span>' : '<span class="muted">(not yet)</span>'}`); } }
   if (q.minLevel) reqs.push(`PMC level ${q.minLevel}`);
   if (q.minLevelWiki && q.minLevelWiki !== q.minLevel) reqs.push(`<span class="muted">The wiki page still says level ${q.minLevelWiki} – the game files (patch 1.1) ${q.minLevel ? `say level ${q.minLevel}` : 'have no level requirement any more'}.</span>`);
-  if (q.ll) reqs.push(`${esc(q.ll.trader)} loyalty level ${q.ll.level} <span class="muted">(yours: ${traderLL(q.ll.trader, p)})</span>`);
-  for (const x of q.vars || []) { const need = varNeed(x, p); const n = IX.vars[x.v].groups.length; reqs.push(`${esc(x.trader)} LL${x.tier} task group ${x.group + 1} of ${n} ${need ? `<span class="muted">– unlocks after ${need} more finished ${esc(x.trader)} LL${x.tier} task${need > 1 ? 's' : ''} or when you reach LL${x.tier + 1}</span>` : '<span class="t-ok">✓</span>'}`); }
+  if (q.ll) reqs.push(`${esc(q.ll.trader)} loyalty level ${q.ll.level} <span class="muted">(${esc(llNote(q.ll.trader, p))})</span>`);
+  for (const x of q.vars || []) { const t = varText(x, p); reqs.push(`${t.html} ${t.ok ? '<span class="t-ok">✓</span>' : ''}`); }
   const kapG = preOf(q).filter(g => g.every(a => a.kappa));
   if (kapG.length) { const vis = kapG.filter(g => visible(D.quests[g[0].q], p)); const dn = vis.filter(g => isDone(g[0].q, p)).length; reqs.push(`Complete all Kappa-required quests <span class="muted">(${dn}/${vis.length} done – see the Kappa tab)</span>`); }
   for (const g of preOf(q).filter(g => !g.every(a => a.kappa))) reqs.push(g.map(a => `${a.type === 'accept' ? 'Accept ' : a.type === 'fail' ? 'Fail ' : 'Complete '}${qlink(a.q)}${a.delay ? ` <span class="muted">(+${esc(a.delay)})</span>` : ''}`).join(' <b>or</b> '));

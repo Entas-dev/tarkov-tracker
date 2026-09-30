@@ -1,5 +1,5 @@
 // Shared UI helpers & components
-import { D, IX, P, questStatus, isDone, visible, traderLL, traderUnlocked, questMapsUnlocked, questNeeds, isSeasonal, preOf, groupSatisfied, questObjProgress, varNeed, chReqMet } from './model.js';
+import { D, IX, P, questStatus, isDone, visible, traderLL, traderUnlocked, questMapsUnlocked, questNeeds, isSeasonal, preOf, groupSatisfied, questObjProgress, varNeed, varText, chReqMet } from './model.js';
 
 export const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 export const attr = esc;
@@ -85,7 +85,7 @@ export function questTooltip(name) {
   if (q.minLevel) rows.push(`${ok(p.settings.level >= q.minLevel)} PMC level ${q.minLevel}`);
   if (q.ll) rows.push(`${ok(traderLL(q.ll.trader, p) >= q.ll.level)} ${esc(q.ll.trader)} LL${q.ll.level}`);
   for (const c of q.chReq || []) rows.push(`${ok(chReqMet(c, p))} <span>${c.html}</span>`);
-  for (const x of q.vars || []) { const need = varNeed(x, p); rows.push(`${ok(!need)} ${esc(x.trader)} LL${x.tier} task group ${x.group + 1}/${IX.vars[x.v].groups.length}${need ? ` <span class="muted">(finish ${need} more ${esc(x.trader)} LL${x.tier} task${need > 1 ? 's' : ''} or reach LL${x.tier + 1})</span>` : ''}`); }
+  for (const x of q.vars || []) { const t = varText(x, p); rows.push(`${ok(t.ok)} ${t.html}`); }
   const kapG = preOf(q).filter(g => g.every(a => a.kappa));
   if (kapG.length) { const vis = kapG.filter(g => visible(D.quests[g[0].q], p)); const dn = vis.filter(g => groupSatisfied(g, p)).length; rows.push(`${ok(dn === vis.length)} All Kappa-required quests <span class="muted">(${dn}/${vis.length} done)</span>`); }
   for (const g of preOf(q)) {

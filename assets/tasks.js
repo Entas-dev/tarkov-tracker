@@ -1,6 +1,6 @@
 // In-game style task screen: task list grouped by loyalty level (or trader) on the left, task details on the right.
 import { store } from './store.js';
-import { D, IX, P, visible, questStatus, isDone, questObjProgress, questNeeds, traderLL, traderUnlocked, questMapsUnlocked, preOf, groupSatisfied, varNeed, chReqMet, isSeasonal } from './model.js';
+import { D, IX, P, visible, questStatus, isDone, questObjProgress, questNeeds, traderLL, traderUnlocked, questMapsUnlocked, preOf, groupSatisfied, varNeed, varText, llNote, chReqMet, isSeasonal } from './model.js';
 import { esc, attr, icon, img, traderImg, qlink, itemChip, fmt } from './ui.js';
 import { objectiveRows, needsBlock, questBadges } from './components.js';
 
@@ -150,8 +150,8 @@ export function taskDetail(q, id = '') {
   if (IX.tourGates?.[q.trader]) req.push(`${ok(traderUnlocked(q.trader, p))} ${esc(q.trader)} unlocked <span class="muted">(Tour: ${esc(IX.tourGates[q.trader].step)})</span>`);
   { const ms = (q.maps || []).filter(Boolean); if (ms.length && ms.every(m => IX.mapGates?.[m])) req.push(`${ok(questMapsUnlocked(q, p))} Access to ${esc(ms.join(' or '))}`); }
   if (q.minLevel) req.push(`${ok(p.settings.level >= q.minLevel)} PMC level ${q.minLevel}`);
-  if (q.ll) req.push(`${ok(traderLL(q.ll.trader, p) >= q.ll.level)} ${esc(q.ll.trader)} loyalty level ${q.ll.level} <span class="muted">(yours: ${traderLL(q.ll.trader, p)})</span>`);
-  for (const x of q.vars || []) { const need = varNeed(x, p); req.push(`${ok(!need)} ${esc(x.trader)} LL${x.tier} task group ${x.group + 1}/${IX.vars[x.v].groups.length}${need ? ` <span class="muted">– ${need} more ${esc(x.trader)} LL${x.tier} task${need > 1 ? 's' : ''} or LL${x.tier + 1}</span>` : ''}`); }
+  if (q.ll) req.push(`${ok(traderLL(q.ll.trader, p) >= q.ll.level)} ${esc(q.ll.trader)} loyalty level ${q.ll.level} <span class="muted">(${esc(llNote(q.ll.trader, p))})</span>`);
+  for (const x of q.vars || []) { const t = varText(x, p); req.push(`${ok(t.ok)} ${t.html}`); }
   for (const c of q.chReq || []) req.push(`${ok(chReqMet(c, p))} <span>${c.html}</span>`);
   const kapG = preOf(q).filter(g => g.every(a => a.kappa));
   if (kapG.length) { const vis = kapG.filter(g => visible(D.quests[g[0].q], p)); const dn = vis.filter(g => groupSatisfied(g, p)).length; req.push(`${ok(dn === vis.length)} All Kappa-required tasks <span class="muted">(${dn}/${vis.length})</span>`); }
