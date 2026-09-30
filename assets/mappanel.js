@@ -9,11 +9,12 @@ const LEAFLET_JS = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet
 const LEAFLET_CSS = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css';
 
 let qT = null;
-let panel, mapEl, listEl, leafletMap, L, mapCfgs = null, curKey = null, markerLayer = null, extractLayer = null, focusQuest = null;
+let panel, box, docked = false, mapEl, listEl, leafletMap, L, mapCfgs = null, curKey = null, markerLayer = null, extractLayer = null, focusQuest = null;
 let md = null; // marker snapshot {tasks, maps, fetchedAt, gameMode} built daily from json.tarkov.dev
 let mdState = 'idle';
 let lootLayer = null;
 let hl = { item: null, cont: null, fit: false }; // highlighted loot item index / container type name
+let hlStat = null; // {loose, cont} of the last drawn highlight
 const view = () => store.ui.mpView || 'quests';
 const MAP_ALIAS = { 'ground-zero-21': 'ground-zero', 'ground-zero-tutorial': 'ground-zero', 'night-factory': 'factory', 'the-lab-dark': 'the-lab' };
 const mapIs = (m, cfg) => (MAP_ALIAS[m] || m) === cfg.normalizedName;
@@ -44,9 +45,12 @@ export function initMapPanel() {
       <div class="mp-foot small muted">Map images, marker &amp; spawn positions: <a href="https://tarkov.dev/maps" target="_blank" rel="noopener">tarkov.dev</a> · Quests &amp; container loot tables: EFT wiki</div>
     </div>`;
   document.body.appendChild(panel);
+  box = panel.querySelector('.mp-box');
   mapEl = panel.querySelector('.mp-map');
   listEl = panel.querySelector('.mp-list');
-  panel.addEventListener('click', (e) => {
+  panel.querySelector('.mp-toggle').addEventListener('click', () => togglePanel());
+  // listeners on the box: it moves into the In-Raid view when docked
+  box.addEventListener('click', (e) => {
     const b = e.target.closest('[data-mp]');
     if (b?.dataset.mp === 'toggle') togglePanel();
     if (b?.dataset.mp === 'size') { panel.classList.toggle('big'); setTimeout(() => { leafletMap?.invalidateSize(); fitWhole(true); }, 220); }
@@ -61,19 +65,20 @@ export function initMapPanel() {
     const ls = e.target.closest('[data-mpls]');
     if (ls) { const k = ls.dataset.mpls, v = ls.dataset.v; store.setUi(k, k === 'mplLim' ? (store.ui.mplLim || 80) + 150 : v); renderList(); }
   });
-  panel.addEventListener('toggle', (e) => { if (e.target.matches?.('.ml-cd')) store.setUi('mplC', e.target.open); }, true);
-  panel.addEventListener('input', (e) => {
+  box.addEventListener('toggle', (e) => { if (e.target.matches?.('.ml-cd')) store.setUi('mplC', e.target.open); }, true);
+  box.addEventListener('input', (e) => {
     const q = e.target.closest('[data-mplq]');
     if (q) { store.setUi('mplq', q.value); clearTimeout(qT); qT = setTimeout(() => { const pos = q.selectionStart; renderList(); const nq = listEl.querySelector('[data-mplq]'); if (nq) { nq.focus(); try { nq.setSelectionRange(pos, pos); } catch { } } }, 180); }
   });
-  panel.querySelector('.mp-select').addEventListener('change', (e) => showMap(e.target.value));
-  panel.querySelector('[data-mp="extracts"]').addEventListener('change', () => drawMarkers());
-  panel.querySelector('[data-mp="loot"]').addEventListener('change', () => drawMarkers());
-  panel.querySelector('[data-mp="bp"]').addEventListener('change', (e) => { store.setUi('mpBp', e.target.checked); drawMarkers(); });
+  box.querySelector('.mp-select').addEventListener('change', (e) => showMap(e.target.value));
+  box.querySelector('[data-mp="extracts"]').addEventListener('change', () => drawMarkers());
+  box.querySelector('[data-mp="loot"]').addEventListener('change', () => drawMarkers());
+  box.querySelector('[data-mp="bp"]').addEventListener('change', (e) => { store.setUi('mpBp', e.target.checked); drawMarkers(); });
   store.on((reason) => {
     if (reason === 'profile' && initP && md?.gameMode !== store.profile.gameMode) { md = null; loadMarkers(); }
     if (reason === 'profile' && initP) { hl = { item: null, cont: null, fit: false }; ensureLoot(); }
-    if (!panel.classList.contains('collapsed')) { renderList(); drawMarkers(); }
+    if (reason === 'map') return;
+    if (docked || !panel.classList.contains('collapsed')) { renderList(); drawMarkers(); }
   });
 }
 
@@ -84,29 +89,70 @@ function togglePanel(force) {
   if (open) { ensureInit().then(() => { if (!curKey) showMap(store.ui.mapKey || 'customs'); else { leafletMap?.invalidateSize(); renderList(); drawMarkers(); } }); }
 }
 
+const keyFor = (wikiMapName) => {
+  const k = WIKI_TO_KEY(wikiMapName || '');
+  const cfg = k && (mapCfgs.find(m => m.key === k || m.normalizedName === k) || mapCfgs.find(m => k.includes(m.normalizedName)));
+  return cfg ? cfg.key : null;
+};
 export function openMap(wikiMapName, questName = null) {
   focusQuest = questName;
-  togglePanel(true);
+  if (!docked) togglePanel(true);
+  ensureInit().then(() => showMap(keyFor(wikiMapName) || curKey || 'customs'));
+}
+
+// ---------- docked mode (In-Raid view): the map box lives inside the page, without the side list ----------
+export function dockMap(slot, fallbackWikiMap = null) {
+  if (!slot || !box) return;
+  if (box.parentElement !== slot) slot.appendChild(box);
+  const was = docked;
+  docked = true;
+  box.classList.add('docked');
+  panel.classList.add('collapsed', 'away');
   ensureInit().then(() => {
-    const k = WIKI_TO_KEY(wikiMapName);
-    const cfg = mapCfgs.find(m => m.key === k || m.normalizedName === k) || mapCfgs.find(m => k.includes(m.normalizedName));
-    showMap(cfg ? cfg.key : (curKey || 'customs'));
+    if (!curKey) showMap(store.ui.mapKey || keyFor(fallbackWikiMap) || 'customs');
+    else { leafletMap?.invalidateSize(); if (!was) { fitWhole(!(hl.item != null)); drawMarkers(); } }
   });
+}
+export function undockMap() {
+  if (!docked) return;
+  docked = false;
+  box.classList.remove('docked');
+  panel.appendChild(box);
+  panel.classList.remove('away');
+  togglePanel(false);
+}
+export const isDocked = () => docked;
+// wiki name of the map currently shown (or last shown)
+export const currentMapWiki = () => { const k = curKey || store.ui.mapKey; return k ? wikiNameFor(k) : null; };
+// highlight where one item can spawn on the current map (docked view)
+export async function highlightItem(itemName) {
+  await ensureInit();
+  await ensureLoot();
+  const i = itemName ? itemIndex(itemName) : -1;
+  hl = { item: i >= 0 ? i : null, cont: null, fit: i >= 0 };
+  drawMarkers();
+  return i >= 0 ? hlStat : null;
+}
+export const highlightedIndex = () => hl.item;
+// bosses of the current map (tarkov.dev spawn data) – for "eliminate <boss>" objectives that work on several maps
+export function bossInfo() {
+  const cfg = curCfg();
+  if (!md?.bosses || !cfg) return null;
+  return { all: Object.keys(md.bosses), here: new Set(Object.entries(md.bosses).filter(([, ms]) => ms.some(m => mapIs(m, cfg))).map(([b]) => b)) };
 }
 
 // open the map on the loot view with one item's spawns highlighted
 export function openMapLoot(wikiMapName, itemName) {
   focusQuest = null;
-  store.setUi('mpView', 'loot');
-  togglePanel(true);
+  if (!docked) { store.setUi('mpView', 'loot'); togglePanel(true); }
   ensureInit().then(async () => {
     await ensureLoot();
     const i = itemIndex(itemName);
     hl = { item: i >= 0 ? i : null, cont: null, fit: true };
     if (i >= 0) store.setUi('mplq', '');
-    const k = WIKI_TO_KEY(wikiMapName || '');
-    const cfg = mapCfgs.find(m => m.key === k || m.normalizedName === k) || mapCfgs.find(m => k && k.includes(m.normalizedName)) || mapCfgs.find(m => m.key === curKey);
-    showMap(cfg ? cfg.key : 'customs');
+    const k = keyFor(wikiMapName) || curKey || 'customs';
+    if (docked && k === curKey) { drawMarkers(); return; }
+    showMap(k);
   });
 }
 
@@ -127,7 +173,7 @@ function ensureInit() {
     await loadJs(LEAFLET_JS);
     L = window.L;
     mapCfgs = await fetch('data/maps.json').then(r => r.json());
-    const sel = panel.querySelector('.mp-select');
+    const sel = box.querySelector('.mp-select');
     sel.innerHTML = mapCfgs.map(m => `<option value="${m.key}">${esc(displayName(m.key))}</option>`).join('');
     loadMarkers();
     ensureLoot();
@@ -137,7 +183,7 @@ function ensureInit() {
 
 const NAMES = { 'streets-of-tarkov': 'Streets of Tarkov', 'ground-zero': 'Ground Zero', 'the-lab': 'The Lab', 'the-labyrinth': 'The Labyrinth' };
 const displayName = (k) => NAMES[k] || k.replace(/(^|-)([a-z])/g, (m, a, b) => (a ? ' ' : '') + b.toUpperCase());
-const wikiNameFor = (k) => { const d = displayName(k); return IX.maps.find(m => norm(m) === norm(d)) || d; };
+export const wikiNameFor = (k) => { const d = displayName(k); return IX.maps.find(m => norm(m) === norm(d)) || d; };
 
 // ---------- marker data (snapshot of tarkov.dev's static exports, refreshed daily by the GitHub Action) ----------
 async function loadMarkers() {
@@ -154,7 +200,7 @@ async function loadMarkers() {
   drawMarkers();
 }
 function setStatus() {
-  const s = panel.querySelector('.mp-status');
+  const s = box.querySelector('.mp-status');
   if (mdState === 'loading') s.textContent = 'Loading markers…';
   else if (mdState === 'missing') s.textContent = 'Marker data not available yet – map & quest list still work';
   else if (mdState === 'ok') { const h = Math.round((Date.now() - md.fetchedAt) / 3600e3); s.textContent = `Markers: tarkov.dev data, ${h < 1 ? 'just updated' : h + ' h old'}`; }
@@ -195,7 +241,7 @@ async function showMap(key) {
   const cfg = mapCfgs.find(m => m.key === key) || mapCfgs[0];
   curKey = cfg.key;
   store.setUi('mapKey', curKey);
-  panel.querySelector('.mp-select').value = curKey;
+  box.querySelector('.mp-select').value = curKey;
   if (leafletMap) { leafletMap.remove(); leafletMap = null; }
   mapEl.innerHTML = '';
   leafletMap = L.map(mapEl, { crs: getCRS(cfg), minZoom: cfg.minZoom ?? 1, maxZoom: Math.max(cfg.maxZoom ?? 5, 6), zoomSnap: 0.25, attributionControl: false, zoomControl: true });
@@ -215,7 +261,7 @@ async function showMap(key) {
   }
   curBounds = b;
   fitWhole(true);
-  const hlOn = view() === 'loot' && (hl.item != null || hl.cont);
+  const hlOn = (docked || view() === 'loot') && (hl.item != null || hl.cont);
   if (hlOn) hl.fit = true;
   setTimeout(() => { leafletMap?.invalidateSize(); fitWhole(!hlOn && !focusQuest); if (hlOn) { hl.fit = true; drawMarkers(); } }, 80);
   markerLayer = L.layerGroup().addTo(leafletMap);
@@ -223,6 +269,7 @@ async function showMap(key) {
   lootLayer = L.layerGroup().addTo(leafletMap);
   renderList();
   drawMarkers(true);
+  if (docked) store.notify('map');
 }
 
 function activeQuestsHere() {
@@ -241,8 +288,8 @@ function viewTabs(nq) {
   return `<div class="mp-tabs" role="tablist"><button role="tab" aria-selected="${v === 'quests'}" class="mp-tab ${v === 'quests' ? 'on' : ''}" data-mpv="quests">Quests <span class="muted">${nq}</span></button><button role="tab" aria-selected="${v === 'loot'}" class="mp-tab ${v === 'loot' ? 'on' : ''}" data-mpv="loot">${icon('box')} Loot</button></div>`;
 }
 function renderList() {
-  if (!curKey) return;
-  panel.classList.toggle('loot', view() === 'loot');
+  if (!curKey || docked) return;
+  box.classList.toggle('loot', view() === 'loot');
   if (view() === 'loot') return renderLootList();
   const p = P();
   const names = activeQuestsHere();
@@ -333,7 +380,7 @@ function drawMarkers(fit = false) {
   markerLayer.clearLayers(); extractLayer.clearLayers(); lootLayer?.clearLayers();
   const cfg = curCfg();
   const names = activeQuestsHere();
-  const lootView = view() === 'loot';
+  const lootView = !docked && view() === 'loot';
   const pts = [];
   const lp = lootData() ? lootPoints(cfg.normalizedName) : null;
   if (md && !lootView) {
@@ -362,7 +409,7 @@ function drawMarkers(fit = false) {
     }
   }
   const mp = md ? md.maps.filter(m => mapIs(m.map, cfg)) : [];
-  if (panel.querySelector('[data-mp="extracts"]').checked) {
+  if (box.querySelector('[data-mp="extracts"]').checked) {
     const seen = new Set();
     for (const m of mp) for (const ex of m.extracts) {
       if (ex.f && ex.f !== 'pmc' && ex.f !== 'shared') continue;
@@ -372,7 +419,7 @@ function drawMarkers(fit = false) {
     }
   }
   const xz = (x, z) => [z, x];
-  if (!lootView && panel.querySelector('[data-mp="loot"]').checked) {
+  if (!lootView && box.querySelector('[data-mp="loot"]').checked) {
     const { items, keys } = neededHere(focusQuest ? [focusQuest] : names);
     if (lp && items.size) {
       let cnt = 0;
@@ -390,7 +437,7 @@ function drawMarkers(fit = false) {
     }
   }
   // BattlePass documents: always on every map (unless switched off)
-  if (lp && panel.querySelector('[data-mp="bp"]')?.checked) {
+  if (lp && box.querySelector('[data-mp="bp"]')?.checked) {
     const ld = lootData();
     const docs = new Set((D.battlepass?.docTypes || []).map(t => t.name));
     const bpIdx = new Map();
@@ -402,7 +449,8 @@ function drawMarkers(fit = false) {
     }
   }
   // loot view: highlighted item (loose spots + containers that can hold it) or one container type
-  if (lootView && lp && (hl.item != null || hl.cont)) {
+  hlStat = null;
+  if ((lootView || docked) && lp && (hl.item != null || hl.cont)) {
     const ld = lootData();
     const hpts = [];
     if (hl.item != null) {
@@ -428,6 +476,7 @@ function drawMarkers(fit = false) {
         hpts.push(xz(c[1], c[2]));
       }
     }
+    if (hl.item != null) hlStat = { loose: hpts.length - lp.cont.filter(c => containerCanHold(c[0], hl.item)).length, cont: lp.cont.filter(c => containerCanHold(c[0], hl.item)).length };
     if (hl.fit && hpts.length) { hl.fit = false; leafletMap.fitBounds(L.latLngBounds(hpts).pad(0.15), { maxZoom: (cfg.maxZoom || 5) - 1 }); }
   }
   if (fit && focusQuest && pts.length) leafletMap.fitBounds(L.latLngBounds(pts).pad(0.3), { maxZoom: (cfg.maxZoom || 5) - 1 });

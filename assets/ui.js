@@ -134,6 +134,7 @@ export function initTooltips() {
   document.addEventListener('scroll', hideTip, true);
 }
 function showTip(t) {
+  if (!t.isConnected) return; // re-rendered meanwhile
   let html = '';
   if (t.dataset.tipQ) html = questTooltip(t.dataset.tipQ);
   else if (t.dataset.tipItem) html = itemTooltip(t.dataset.tipItem);
@@ -150,7 +151,7 @@ function showTip(t) {
   tipEl.style.left = Math.max(8, x) + 'px';
   tipEl.style.top = y + 'px';
 }
-export function hideTip() { tipEl?.classList.remove('show'); tipTarget = null; }
+export function hideTip() { clearTimeout(tipTimer); tipEl?.classList.remove('show'); tipTarget = null; }
 
 // ---------- modal ----------
 export function confirmDialog({ title, bodyHtml, buttons }) {

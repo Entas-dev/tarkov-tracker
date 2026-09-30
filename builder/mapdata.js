@@ -98,5 +98,16 @@ export function transformMapData({ tasks, tasksEn, maps, mapsEn, gameMode = 'reg
       locks: (m.locks || []).filter(l => l.key && l.position).map(l => ({ k: l.key, p: P(l.position) })),
     });
   }
+  // which boss can spawn on which map (for "eliminate <boss>" objectives that work on several maps)
+  const mobs = maps.data.mobs || {};
+  const bosses = {};
+  const addB = (id, map) => {
+    const name = tr(mobs[id]?.name || id, mapsEn);
+    if (!name || /^(boss|follower|pmcBot|exUsec|sectant)/i.test(name)) return;
+    (bosses[name] = bosses[name] || []);
+    if (!bosses[name].includes(map)) bosses[name].push(map);
+  };
+  for (const m of mapsArr) for (const b of m.bosses || []) { addB(b.mob, m.normalizedName); for (const e of b.escorts || []) addB(e.mob || e.boss, m.normalizedName); }
+  out.bosses = bosses;
   return out;
 }

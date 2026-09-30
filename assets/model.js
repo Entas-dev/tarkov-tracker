@@ -633,7 +633,32 @@ export function storyHideout(ending = P().settings.ending || 'Savior', p = P()) 
 }
 
 // sel: {story, kappa, quests, hideout}. Returns [{item, need, have, fir, prio, sources:[…]}] sorted by priority.
-export function neededItems(sel, { includeCurrency = false, includeQuestItems = false, includeOptional = false } = {}, p = P()) {
+// Gunsmith: parts of the wiki's example build that no trader sells for money (barter-only or "Loot Only").
+// A group of alternatives ("you only need one of the below") only counts when none of them can be bought.
+// all = every part of the build (a buyable alternative is picked for groups).
+export function gunsmithParts(q, { all = false } = {}) {
+  const out = [];
+  for (const b of q.builds || []) {
+    const groups = {};
+    for (const x of b.parts) if (x.grp) (groups[x.grp] = groups[x.grp] || []).push(x);
+    for (const x of b.parts) {
+      if (x.grp) {
+        const g = groups[x.grp];
+        if (g[0] !== x || (!all && g.some(y => y.cash))) continue;
+        const pick = (all && g.find(y => y.cash)) || x;
+        out.push({ ...pick, alts: g.filter(y => y !== pick).map(y => y.item) });
+        continue;
+      }
+      if (all || !x.cash) out.push(x);
+    }
+  }
+  const agg = {};
+  for (const x of out) { const a = agg[x.item] || (agg[x.item] = { ...x, count: 0 }); a.count++; }
+  return Object.values(agg);
+}
+export const partBuyText = (x) => x.sold || (x.offers?.length ? x.offers.map(o => `${o.trader} ${o.text}`).join(', ') : 'not sold by traders');
+
+export function neededItems(sel, { includeCurrency = false, includeQuestItems = false, includeOptional = false, gunsmith = true, gunsmithAll = false } = {}, p = P()) {
   const agg = {};
   const add = (item, count, have, fir, prio, src) => {
     const I = D.items[item];
@@ -657,6 +682,10 @@ export function neededItems(sel, { includeCurrency = false, includeQuestItems = 
     const st = questStatus(q, p);
     const prio = st.s === 'available' ? (p.active?.[n] ? 4 : 3) : 1;
     for (const x of questNeeds(q, p, { includeOptional })) add(x.item, x.count, x.have, x.fir, prio, { type: 'quest', name: n, key: cntKey(n, x.item), order: i });
+    if (gunsmith && q.builds) for (const x of gunsmithParts(q, { all: gunsmithAll })) {
+      const k = `gs:${n}|${x.item}`;
+      add(x.item, x.count, p.cnt[k] || 0, false, prio, { type: 'gunsmith', name: n, key: k, order: i, buy: partBuyText(x), cash: x.cash, alts: x.alts || [] });
+    }
   });
   // story chapters
   const ending = p.settings.ending || 'Savior';

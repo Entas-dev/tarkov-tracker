@@ -143,19 +143,68 @@ export function renderAchievements(root) {
     <span class="a-check">${icon('check')}</span></button>`).join('') || '<div class="empty">No achievements match.</div>'}</div>`;
 }
 
-// ---------------- ITEMS (shopping list) ----------------
 // ---------------- NEEDED ITEMS ----------------
-const IDEF = { story: true, kappa: false, quests: true, hideout: true, currency: false, questItems: false, optional: false, q: '', view: 'grid', showDone: false };
+const IDEF = { story: true, kappa: false, quests: true, hideout: true, currency: false, questItems: false, optional: false, gunsmith: true, gsAll: false, q: '', showDone: false };
 export const itemFilter = () => ({ ...IDEF, ...(ui().if2 || {}) });
+export const itemView = () => ui().iv || 'fit';
 export function itemList() {
   const f = itemFilter();
-  return neededItems({ story: f.story, kappa: f.kappa, quests: f.quests, hideout: f.hideout }, { includeCurrency: f.currency, includeQuestItems: f.questItems, includeOptional: f.optional });
+  return neededItems({ story: f.story, kappa: f.kappa, quests: f.quests, hideout: f.hideout }, { includeCurrency: f.currency, includeQuestItems: f.questItems, includeOptional: f.optional, gunsmith: f.gunsmith, gunsmithAll: f.gsAll });
 }
 const PRIO = [[3, 'Needed now', 'open quests you can do now and the next hideout level you can build'], [2, 'Next up', 'story, next hideout levels once their requirements are met'], [1, 'Later', 'locked quests and later hideout levels']];
-const srcLabel = (s) => (s.type === 'hideout' ? `${s.name} L${s.level}${s.story ? ' (story)' : ''}` : s.name);
+export const srcLabel = (s) => (s.type === 'hideout' ? `${s.name} L${s.level}${s.story ? ' (story)' : ''}` : s.type === 'gunsmith' ? `${s.name} – build part` : s.name);
+const onlyGs = (a) => a.sources.some(s => s.type === 'gunsmith' && s.count > s.have) && a.sources.every(s => s.type === 'gunsmith' || s.count <= s.have);
+const tipText = (a) => {
+  const open = a.sources.filter(s => s.count > s.have);
+  const gs = open.find(s => s.type === 'gunsmith');
+  return `${a.item} – need ${a.need - a.have}${a.have ? ` (have ${a.have}/${a.need})` : ''}${a.fir ? `, ${a.fir} FiR` : ''}: ${open.slice(0, 4).map(s => `${srcLabel(s)} ×${s.count - s.have}`).join(', ')}${open.length > 4 ? ` +${open.length - 4}` : ''}${gs ? ` · Traders: ${gs.buy}${gs.alts?.length ? ` · or: ${gs.alts.join(', ')}` : ''}` : ''}`;
+};
+
+// one icon tile · opts.act: click action (it-tap = tick / count, ir-hl = show spawns) · opts.here: spawns on the current map · opts.sel
+export function itemTile(a, opts = {}) {
+  const I = D.items[a.item] || {};
+  const miss = Math.max(0, a.need - a.have);
+  const sel = opts.sel ?? ui().ipop === a.item;
+  const gs = onlyGs(a);
+  return `<button class="ig-t p${Math.min(a.prio, 3)} ${miss ? '' : 'got'} ${sel ? 'sel' : ''} ${opts.here ? 'here' : ''}" data-act="${opts.act || 'it-tap'}" data-item="${attr(a.item)}" data-tip="${attr(tipText(a))}" aria-label="${attr(`${a.item}: ${a.have} of ${a.need}`)}">
+    ${img(I.img, a.item, 'ig-img')}${a.fir && miss ? '<span class="ig-fir">FiR</span>' : ''}${a.prio >= 4 ? '<span class="ig-act">!</span>' : gs ? '<span class="ig-gs">GS</span>' : ''}${opts.here ? `<span class="ig-here" aria-label="spawns on this map">${icon('map')}</span>` : ''}
+    <span class="ig-n">${miss ? fmt(miss) : icon('check')}</span>${a.have && miss ? `<span class="ig-have">${fmt(a.have)}/${fmt(a.need)}</span>` : ''}</button>`;
+}
+export const legendHtml = () => `<div class="ig-leg small muted"><span><i class="lg p3"></i>Needed now</span><span><i class="lg p2"></i>Next up</span><span><i class="lg p1"></i>Later</span><span><b class="lg-b act">!</b> open quest you ticked</span><span><b class="lg-b fir">FiR</b> found in raid</span><span><b class="lg-b gs">GS</b> Gunsmith part no trader sells</span></div>`;
+
+// size the tiles of every "all at once" grid so that all of them fit into the space they have
+export function fitGrids(scope = document) {
+  for (const wrap of scope.querySelectorAll('.ig-fitwrap')) {
+    const grid = wrap.querySelector('.ig-grid');
+    if (!grid) continue;
+    const n = grid.children.length;
+    const H = wrap.dataset.fit === 'page' ? Math.max(260, window.innerHeight - (wrap.getBoundingClientRect().top + window.scrollY) - 14) : wrap.clientHeight - 2;
+    const W = grid.clientWidth || wrap.clientWidth;
+    const g = 3;
+    let s = 26;
+    for (let t = 112; t >= 26; t--) { const cols = Math.max(1, Math.floor((W + g) / (t + g))); if (Math.ceil(n / cols) * (t + g) - g <= H) { s = t; break; } }
+    grid.style.setProperty('--ig-s', s + 'px');
+    grid.classList.toggle('sm', s < 52);
+    grid.classList.toggle('xs', s < 38);
+  }
+}
+let fitT = null;
+addEventListener('resize', () => { clearTimeout(fitT); fitT = setTimeout(() => fitGrids(), 120); });
+
+export function goalToggles(f, compact = false) {
+  const tog = (k, l, tip) => `<button class="seg-b ${f[k] ? 'on' : ''}" data-act="ifx" data-k="${k}" aria-pressed="${!!f[k]}" data-tip="${attr(tip)}">${l}</button>`;
+  return `<div class="seg multi" role="group" aria-label="Goals">
+      ${tog('story', 'Story', 'Chapters you need for your ending – including the hideout levels the story requires')}
+      ${tog('kappa', 'Kappa', 'All Kappa-required quests incl. Collector')}
+      ${tog('quests', compact ? 'Quests' : 'All quests', 'Every unfinished quest')}
+      ${tog('hideout', 'Hideout', 'Every hideout level you have not built')}
+      ${compact ? '' : '<button class="seg-b" data-act="ifall" data-tip="Story + all quests + hideout">All</button>'}
+    </div>`;
+}
 
 export function renderItems(root) {
   const f = itemFilter();
+  const view = itemView();
   const all = itemList();
   const q = (f.q || '').toLowerCase();
   const shown = all.filter(a => !q || a.item.toLowerCase().includes(q) || a.sources.some(s => s.name.toLowerCase().includes(q)));
@@ -165,19 +214,10 @@ export function renderItems(root) {
   const ld = lootData();
   if (!ld && lootState() === 'idle') ensureLoot();
   const where = (item) => { if (!ld) return ''; const bm = bestMaps(itemIndex(item)).slice(0, 3); return bm.length ? `<div class="i-where small muted">Best maps: ${bm.map(b => esc(mapDisplayName(b.key))).join(', ')}</div>` : ''; };
-  const tog = (k, l, tip) => `<button class="seg-b ${f[k] ? 'on' : ''}" data-act="ifx" data-k="${k}" aria-pressed="${!!f[k]}" data-tip="${attr(tip)}">${l}</button>`;
-  const tile = (a) => {
-    const I = D.items[a.item] || {};
-    const miss = Math.max(0, a.need - a.have);
-    const sel = ui().ipop === a.item;
-    return `<button class="ig-t p${Math.min(a.prio, 3)} ${miss ? '' : 'got'} ${sel ? 'sel' : ''}" data-act="it-tap" data-item="${attr(a.item)}" data-tip-item="${attr(a.item)}" aria-label="${attr(`${a.item}: ${a.have} of ${a.need}`)}">
-      ${img(I.img, a.item, 'ig-img')}${a.fir && miss ? '<span class="ig-fir">FiR</span>' : ''}${a.prio >= 4 ? '<span class="ig-act" title="for a quest you have open">!</span>' : ''}
-      <span class="ig-n">${miss ? fmt(miss) : icon('check')}</span>${a.have && miss ? `<span class="ig-have">${fmt(a.have)}/${fmt(a.need)}</span>` : ''}</button>`;
-  };
-  const row = (a) => { const I = D.items[a.item] || {}; const miss = a.need - a.have; return `<div class="irow p${Math.min(a.prio, 3)}">
+  const row = (a) => { const I = D.items[a.item] || {}; const miss = a.need - a.have; const gs = a.sources.find(s => s.type === 'gunsmith' && s.count > s.have); return `<div class="irow p${Math.min(a.prio, 3)}">
     ${img(I.img, a.item, 'i-ic')}
     <div class="i-main"><div class="i-name"><span class="chip-name" data-item="${attr(a.item)}" data-tip-item="${attr(a.item)}">${esc(a.item)}</span></div>
-      <div class="i-src small">${a.sources.filter(s => s.count > s.have).slice(0, 6).map(s => `<span class="src">${s.type === 'hideout' ? esc(srcLabel(s)) : s.type === 'chapter' ? `<a class="wl" data-t="${attr(s.name)}">${esc(s.name)}</a>` : qlink(s.name)} ×${fmt(s.count - s.have)}${s.fir ? ' <span class="fir">FiR</span>' : ''}</span>`).join('')}</div>${where(a.item)}</div>
+      <div class="i-src small">${a.sources.filter(s => s.count > s.have).slice(0, 6).map(s => `<span class="src">${s.type === 'hideout' ? esc(srcLabel(s)) : s.type === 'chapter' ? `<a class="wl" data-t="${attr(s.name)}">${esc(s.name)}</a>` : qlink(s.name) + (s.type === 'gunsmith' ? ' <span class="muted">part</span>' : '')} ×${fmt(s.count - s.have)}${s.fir ? ' <span class="fir">FiR</span>' : ''}</span>`).join('')}</div>${gs ? `<div class="small muted">Traders: ${esc(gs.buy)}${gs.alts?.length ? ` · or one of: ${esc(gs.alts.join(', '))}` : ''}</div>` : ''}${where(a.item)}</div>
     <div class="i-num"><b>${fmt(Math.max(0, miss))}</b>${a.fir ? `<span class="fir">${fmt(a.fir)} FiR</span>` : ''}</div>
     <button class="btn btn-s" data-act="it-tap" data-item="${attr(a.item)}">Have</button>
     <button class="ibtn" data-act="info-item" data-item="${attr(a.item)}" aria-label="Where to find">${icon('info')}</button>
@@ -187,34 +227,33 @@ export function renderItems(root) {
     const list = open.filter(a => Math.min(a.prio, 3) === pr);
     if (!list.length) return '';
     return `<section class="ig-sec"><h2 class="ig-h">${title} <span class="muted small">${list.length} items · ${hint}</span></h2>
-      ${f.view === 'list' ? `<div class="ilist">${list.map(row).join('')}</div>` : `<div class="ig-grid">${list.map(tile).join('')}</div>`}</section>`;
+      ${view === 'list' ? `<div class="ilist">${list.map(row).join('')}</div>` : `<div class="ig-grid">${list.map(a => itemTile(a)).join('')}</div>`}</section>`;
   };
+  const any = f.story || f.kappa || f.quests || f.hideout;
   root.innerHTML = `
   <div class="tab-head"><div><h1>Needed Items</h1><p class="lede">Everything you still need for the goals you pick. Click an item to tick it (or set how many you have) – most urgent first.</p></div>
     <div class="head-stat"><div class="stat"><b>${open.length}</b> items · <b>${fmt(open.reduce((s, a) => s + a.need - a.have, 0))}</b> pieces · <b class="c-red">${fmt(firTotal)}</b> must be FiR</div></div></div>
   ${perksNotesHtml('items')}
   <div class="filters">
     <span class="small muted">For</span>
-    <div class="seg multi" role="group" aria-label="Goals">
-      ${tog('story', 'Story', 'Chapters you need for your ending – including the hideout levels the story requires')}
-      ${tog('kappa', 'Kappa', 'All Kappa-required quests incl. Collector')}
-      ${tog('quests', 'All quests', 'Every unfinished quest')}
-      ${tog('hideout', 'Hideout', 'Every hideout level you have not built')}
-      <button class="seg-b" data-act="ifall" data-tip="Story + all quests + hideout">All</button>
-    </div>
+    ${goalToggles(f)}
     <label class="search">${icon('search')}<input type="search" placeholder="Search items or quests" value="${attr(f.q || '')}" data-if2="q" aria-label="Search items"></label>
-    <div class="seg" role="radiogroup" aria-label="View"><button class="seg-b ${f.view !== 'list' ? 'on' : ''}" data-act="ifv" data-v="grid">Icons</button><button class="seg-b ${f.view === 'list' ? 'on' : ''}" data-act="ifv" data-v="list">List</button></div>
+    <div class="seg" role="radiogroup" aria-label="View">${[['fit', 'All at once', 'Every item on one screen – tiles shrink to fit'], ['grid', 'By priority', 'Bigger icons, grouped by priority'], ['list', 'List', 'With sources and best maps']].map(([v, l, t]) => `<button role="radio" aria-checked="${view === v}" class="seg-b ${view === v ? 'on' : ''}" data-act="ifv" data-v="${v}" data-tip="${attr(t)}">${l}</button>`).join('')}</div>
+    <label class="tog" data-tip="Parts of the wiki's example Gunsmith builds that no trader sells for money (barter-only or loot-only)"><input type="checkbox" data-if2="gunsmith" ${f.gunsmith ? 'checked' : ''}> Gunsmith parts</label>
+    ${f.gunsmith ? `<label class="tog" data-tip="Also list the Gunsmith parts you can buy from traders"><input type="checkbox" data-if2="gsAll" ${f.gsAll ? 'checked' : ''}> + buyable</label>` : ''}
     <label class="tog"><input type="checkbox" data-if2="currency" ${f.currency ? 'checked' : ''}> Money</label>
     <label class="tog"><input type="checkbox" data-if2="questItems" ${f.questItems ? 'checked' : ''}> Quest items</label>
     <label class="tog"><input type="checkbox" data-if2="optional" ${f.optional ? 'checked' : ''}> Optional</label>
   </div>
-  ${!f.story && !f.kappa && !f.quests && !f.hideout ? '<div class="empty">Pick at least one goal above.</div>' : ''}
-  ${PRIO.map(section).join('') || (f.story || f.kappa || f.quests || f.hideout ? '<div class="empty">Nothing left to collect for these goals.</div>' : '')}
-  ${done.length ? `<section class="ig-sec"><h2 class="ig-h"><button class="linkbtn" data-act="ifx" data-k="showDone">${f.showDone ? 'Hide' : 'Show'} collected (${done.length})</button></h2>${f.showDone ? `<div class="ig-grid">${done.map(tile).join('')}</div>` : ''}</section>` : ''}
+  ${!any ? '<div class="empty">Pick at least one goal above.</div>' : ''}
+  ${view === 'fit' ? (open.length ? `${legendHtml()}<div class="ig-fitwrap" data-fit="page"><div class="ig-grid fit">${open.map(a => itemTile(a)).join('')}</div></div>` : any ? '<div class="empty">Nothing left to collect for these goals.</div>' : '')
+    : (PRIO.map(section).join('') || (any ? '<div class="empty">Nothing left to collect for these goals.</div>' : ''))}
+  ${done.length ? `<section class="ig-sec"><h2 class="ig-h"><button class="linkbtn" data-act="ifx" data-k="showDone">${f.showDone ? 'Hide' : 'Show'} collected (${done.length})</button></h2>${f.showDone ? `<div class="ig-grid">${done.map(a => itemTile(a)).join('')}</div>` : ''}</section>` : ''}
   ${pop ? itemPop(pop) : ''}`;
+  fitGrids(root);
 }
 
-function itemPop(a) {
+export function itemPop(a) {
   const I = D.items[a.item] || {};
   const open = a.sources.filter(s => s.count > 0);
   return `<div class="ipop" role="dialog" aria-label="${attr(a.item)}">
@@ -227,7 +266,7 @@ function itemPop(a) {
       <button class="btn btn-p" data-act="it-set" data-item="${attr(a.item)}" data-v="${a.need}">All</button>
       <button class="btn" data-act="it-set" data-item="${attr(a.item)}" data-v="0">None</button>
     </div>
-    <div class="ipop-s small">${open.map(s => `<div><span class="${s.count > s.have ? '' : 'muted'}">${esc(srcLabel(s))}</span> <b>${fmt(s.have)}/${fmt(s.count)}</b>${s.fir ? ' <span class="fir">FiR</span>' : ''}</div>`).join('')}</div>
+    <div class="ipop-s small">${open.map(s => `<div><span class="${s.count > s.have ? '' : 'muted'}">${esc(srcLabel(s))}</span> <b>${fmt(s.have)}/${fmt(s.count)}</b>${s.fir ? ' <span class="fir">FiR</span>' : ''}${s.type === 'gunsmith' ? ` <span class="muted">· ${esc(s.buy)}${s.alts?.length ? ` · or: ${esc(s.alts.join(', '))}` : ''}</span>` : ''}</div>`).join('')}</div>
     <div class="ipop-f"><button class="linkbtn" data-act="info-item" data-item="${attr(a.item)}">Where to find</button></div>
   </div>`;
 }

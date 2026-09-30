@@ -133,6 +133,43 @@ function relatedItemsTables(wt) {
   return out;
 }
 
+// "Builds" section of the Gunsmith quests: one shopping-list table per weapon
+// (Icon | Attachment | Sold By | Loyalty Level). A full-width row "X - You only need one of the below" starts a group
+// of alternatives; further alternatives follow "OR" rows. "LL2 (Barter)" = only as a barter, "LL3" = for money.
+export function parseBuilds(body) {
+  const out = [];
+  for (const tb of tables(body)) {
+    const hi = tb.rows.findIndex(r => r.some(c => /attachment/i.test(plain(c.raw))));
+    if (hi < 0) continue;
+    const head = tb.rows[hi].map(c => plain(c.raw).toLowerCase());
+    const ca = head.findIndex(h => /attachment/.test(h)), cs = head.findIndex(h => /sold by/.test(h)), cl = head.findIndex(h => /loyalty/.test(h));
+    const parts = [];
+    let grp = 0, curGrp = null, afterOr = false;
+    for (const r of tb.rows.slice(hi + 1)) {
+      if (r.length === 1) {
+        const t = plain(r[0].raw);
+        if (/^or$/i.test(t)) { afterOr = !!curGrp; continue; }
+        if (/only need one|one of the/i.test(t)) { curGrp = ++grp; afterOr = true; continue; }
+        curGrp = null; afterOr = false; continue;
+      }
+      const lk = links(r[ca]?.raw)[0];
+      if (!lk) continue;
+      const g = curGrp && afterOr ? curGrp : null;
+      if (!afterOr) curGrp = null;
+      afterOr = false;
+      const sellers = links(r[cs]?.raw || '').map(l => l.target);
+      const segs = String(r[cl]?.raw || '').split(/<\s*hr\s*\/?\s*>/i);
+      const offers = [];
+      sellers.forEach((t, i) => { for (const o of String(segs[i] || '').split(/<\s*br\s*\/?\s*>/i).map(plain).filter(Boolean)) offers.push({ trader: t, text: o, barter: /barter/i.test(o) }); });
+      const note = plain(String(r[ca].raw).replace(/\[\[[^\]]*\]\]/, '')).trim();
+      const sold = sellers.length ? '' : plain(r[cs]?.raw || ''); // e.g. "Loot Only"
+      parts.push({ item: lk.target, ...(note ? { note } : {}), offers, ...(sold ? { sold } : {}), cash: offers.some(o => !o.barter), ...(g ? { grp: g } : {}) });
+    }
+    if (parts.length) out.push({ parts });
+  }
+  return out;
+}
+
 function parsePrev(raw, self) {
   // returns groups: [[{q,type,delay}], ...] ; alternatives within a group are OR
   const groups = [];
@@ -251,6 +288,8 @@ export function parseQuest(title, wt, meta = {}) {
   q.seasonal.push(...seasonalNotes(rewBody).map(n => ({ ...n, where: 'rewards' })));
   // Related quest items (guide tables)
   q.questItems = relatedItemsTables(section(wt, 'Guide') || '');
+  // Gunsmith: the example build's shopping list (parts + which trader sells them)
+  if (/==\s*Builds?\s*==/i.test(wt)) { const b = parseBuilds(section(wt, 'Builds') || section(wt, 'Build') || ''); if (b.length) q.builds = b; }
   // any remaining seasonal notes elsewhere (lead/guide)
   const seen = new Set(q.seasonal.map(s => s.text));
   for (const s of seasonalNotes(wt)) if (!seen.has(s.text)) q.seasonal.push({ ...s, where: 'other' });

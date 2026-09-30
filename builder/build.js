@@ -73,6 +73,7 @@ export async function buildDataset({ wiki = new Wiki(), log = console.log, progr
   const targets = new Set();
   const addSeq = (o) => { for (const s of o.seq || []) if (s.l && !known.has(s.l) && !NEVER_ITEM.has(s.l)) targets.add(s.l); };
   for (const q of Object.values(quests)) { q.objectives.forEach(addSeq); q.questItems.forEach(r => r.item && targets.add(r.item)); q.maps.forEach(m => targets.add(m)); }
+  for (const q of Object.values(quests)) for (const b of q.builds || []) for (const x of b.parts) targets.add(x.item);
   for (const c of Object.values(chapters)) c.objectives.forEach(addSeq);
   for (const m of hideout.modules) for (const L of m.levels) L.items.forEach(i => i.item && targets.add(i.item));
   for (const l of battlepass.levels) if (l.link) targets.add(l.link);
@@ -150,6 +151,8 @@ export async function buildDataset({ wiki = new Wiki(), log = console.log, progr
 
   step(0.7, 'Resolving objectives and item requirements');
   for (const q of Object.values(quests)) { q.objectives.forEach(resolveObjective); computeNeeds(q); q.maps = q.maps.map(m => cls[m]?.canonical || m); }
+  // Gunsmith build parts → item registry (drop rows that are not items)
+  for (const q of Object.values(quests)) if (q.builds) { for (const bd of q.builds) bd.parts = bd.parts.filter(x => { const k = regItem(x.item); if (k) x.item = k; return !!k; }); q.builds = q.builds.filter(bd => bd.parts.length); if (!q.builds.length) delete q.builds; }
   for (const c of Object.values(chapters)) { c.objectives.forEach(resolveObjective); computeNeeds(c); }
   for (const m of hideout.modules) for (const L of m.levels) {
     const keep = [];

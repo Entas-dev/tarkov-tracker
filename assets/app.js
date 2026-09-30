@@ -7,7 +7,9 @@ import { renderStory, renderKappa, renderTraders, renderQuests } from './tabs-qu
 import { renderHideout, renderPrestige, renderBattlepass, renderAchievements, renderItems, itemFilter, itemList } from './tabs-other.js';
 import { loadDataset, buildLive, isStale, ageText, loadGameReqs } from './data.js';
 let gameReqs = null;
-import { initMapPanel, openMap, openMapLoot } from './mappanel.js';
+import { initMapPanel, openMap, openMapLoot, undockMap, highlightItem, highlightedIndex } from './mappanel.js';
+import { renderInRaid } from './inraid.js';
+import { itemIndex } from './loot.js';
 import { perksBannerHtml, openPerks, togglePerk } from './perks.js';
 import { renderSpeedrun, openActiveSetup, recalcSpeedrun } from './speedrun.js';
 import { tsState, tsSet, initTaskKeys } from './tasks.js';
@@ -15,6 +17,7 @@ import { tsState, tsSet, initTaskKeys } from './tasks.js';
 const TABS = [
   { id: 'story', label: 'Main Story', render: renderStory },
   { id: 'speedrun', label: 'Speedrun', render: renderSpeedrun },
+  { id: 'raid', label: 'In-Raid', render: renderInRaid },
   { id: 'kappa', label: 'Kappa', render: renderKappa },
   { id: 'hideout', label: 'Hideout', render: renderHideout },
   { id: 'traders', label: 'Traders', render: renderTraders },
@@ -103,6 +106,8 @@ function render() {
   const focusSel = ae?.matches?.('input[type=search]') ? { f: ae.dataset.f || ae.dataset.af || ae.dataset.if || ae.dataset.tsq || ae.dataset.if2, pos: ae.selectionStart } : null;
   const keep = {}; main.querySelectorAll('[data-keep]').forEach(el => { keep[el.dataset.keep] = el.scrollTop; });
   hideTip();
+  if (tab.id !== 'raid') undockMap(); // the map box lives inside the In-Raid view – move it back before the page is replaced
+  document.body.classList.toggle('tab-raid', tab.id === 'raid');
   tab.render(main);
   window.scrollTo(0, y);
   main.querySelectorAll('[data-keep]').forEach(el => { if (keep[el.dataset.keep] != null) el.scrollTop = keep[el.dataset.keep]; });
@@ -403,7 +408,15 @@ function onClick(e) {
     case 'iscope': store.setUi('if', { ...(store.ui.if || {}), scope: b.dataset.v }); render(); break;
     case 'ifx': { const f = itemFilter(); store.setUi('if2', { ...f, [b.dataset.k]: !f[b.dataset.k] }); render(); break; }
     case 'ifall': store.setUi('if2', { ...itemFilter(), story: true, quests: true, hideout: true }); render(); break;
-    case 'ifv': store.setUi('if2', { ...itemFilter(), view: b.dataset.v }); render(); break;
+    case 'ifv': store.setUi('iv', b.dataset.v); render(); break;
+    case 'ir-click': store.setUi('irClick', b.dataset.v); store.setUi('ipop', null); render(); break;
+    case 'ir-hl': {
+      hideTip();
+      const name = b.dataset.item || null;
+      const same = name && highlightedIndex() != null && itemIndex(name) === highlightedIndex();
+      highlightItem(same ? null : name).then(st => { render(); if (name && !same) toast(st && (st.loose || st.cont) ? `<b>${esc(name)}</b>: ${st.loose} loose spot${st.loose !== 1 ? 's' : ''} · ${st.cont} container${st.cont !== 1 ? 's' : ''} on this map` : `<b>${esc(name)}</b> has no known spawn on this map`); });
+      break;
+    }
     case 'it-tap': {
       hideTip();
       const a = itemList().find(x => x.item === b.dataset.item);
@@ -424,6 +437,7 @@ let searchT = null;
 function onInput(e) {
   const el = e.target;
   if (el.dataset.itset != null) { const a = itemList().find(x => x.item === el.dataset.itset); if (a) setItemHave(a, Math.max(0, Math.min(a.need, parseInt(el.value, 10) || 0))); return; }
+  if (el.dataset.irhere != null) { store.setUi('irHere', el.checked); render(); return; }
   if (el.dataset.if2) { const f = itemFilter(); store.setUi('if2', { ...f, [el.dataset.if2]: el.type === 'checkbox' ? el.checked : el.value }); if (el.type === 'search') { clearTimeout(searchT); searchT = setTimeout(render, 160); } else render(); return; }
   if (el.dataset.tsopt) { tsSet(el.dataset.id, { [el.dataset.tsopt]: el.checked }); render(); return; }
   if (el.dataset.tsmap != null) { tsSet(el.dataset.tsmap, { map: el.value }); render(); return; }
@@ -450,7 +464,7 @@ async function boot() {
   document.addEventListener('click', onClick);
   document.addEventListener('click', onSettingsClick);
   document.addEventListener('input', (e) => { if (e.target.matches('input[type=search]')) onInput(e); });
-  document.addEventListener('change', (e) => { if (e.target.dataset?.active) { const n = e.target.dataset.active, on = e.target.checked; store.update(pp => { pp.active = pp.active || {}; if (on) pp.active[n] = 1; else delete pp.active[n]; }); return; } if (e.target.dataset?.perk) { togglePerk(e.target.dataset.perk, e.target.checked); return; } if (e.target.matches('select,input[type=checkbox],input[type=number]') && !e.target.id?.startsWith('s-') && !e.target.closest('.mappanel')) { if (e.target.dataset.set === 'faction') store.update(p => { p.settings.faction = e.target.value; }); else onInput(e); } });
+  document.addEventListener('change', (e) => { if (e.target.dataset?.active) { const n = e.target.dataset.active, on = e.target.checked; store.update(pp => { pp.active = pp.active || {}; if (on) pp.active[n] = 1; else delete pp.active[n]; }); return; } if (e.target.dataset?.perk) { togglePerk(e.target.dataset.perk, e.target.checked); return; } if (e.target.matches('select,input[type=checkbox],input[type=number]') && !e.target.id?.startsWith('s-') && !e.target.closest('.mappanel,.mp-box')) { if (e.target.dataset.set === 'faction') store.update(p => { p.settings.faction = e.target.value; }); else onInput(e); } });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeDrawer(); lastDrawer = null; hideTip(); if (store.ui.ipop) { store.setUi('ipop', null); render(); } } });
   addEventListener('hashchange', route);
   matchMedia('(prefers-color-scheme: light)').addEventListener?.('change', () => renderHeader());
