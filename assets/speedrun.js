@@ -352,7 +352,7 @@ export function renderSpeedrun(root) {
   root.innerHTML = `
   <div class="tab-head"><div><h1>Speedrun Guide</h1><p class="lede">Your next raids, planned from your current progress: every objective that can be done on the same map is bundled into one raid – across all traders and all story chapters. Raids with a <b class="c-story">red frame</b> move a storyline forward or start a new one. The plan stays put until you press <b>Recalculate</b>.</p></div>
     <div class="head-stat"><div class="stat"><b>${plan.raids.length}</b> raids · <b>${totalObj}</b> objectives · <b>${totalQ}</b> quests finished</div></div></div>
-  <div class="notice">${icon('list')}<div>Quicker than ticking finished quests: <b>tell the tracker which quests are open in your game</b> and it marks everything before them as done. <button class="btn btn-s btn-p" data-act="active-setup">Set my open quests</button></div></div>
+  <div class="notice">${icon('list')}<div>Quicker than ticking finished quests: <b>tell the tracker which quests are open in your game</b> – paste screenshots of your task lists or tick them per trader – and it marks everything before them as done. <button class="btn btn-s btn-p" data-act="active-setup">Set my open quests</button></div></div>
   <div class="filters">
     <span class="small muted">Plan</span>
     <div class="seg" role="radiogroup" aria-label="Number of raids">${[5, 10, 20, 40].map(n => `<button role="radio" aria-checked="${ui.n === n}" class="seg-b ${ui.n === n ? 'on' : ''}" data-act="sr" data-k="n" data-v="${n}">${n} raids</button>`).join('')}</div>
@@ -491,46 +491,4 @@ function lootPlanHtml(plan, needs, raidLoot, ld) {
     ${top.length > lim ? `<button class="btn more" data-act="more" data-k="srLootLim">Show more (${top.length - lim} hidden)</button>` : ''}
     ${noSpawn.length ? `<div class="sub-h">Quest items without spawn data</div><div class="chips">${noSpawn.slice(0, 30).map(a => itemChip(a.item, { count: a.count, fir: a.fir, small: true })).join('')}</div>` : ''}
   </section>`;
-}
-
-// ---------- "my open quests" setup ----------
-export function openActiveSetup() {
-  const p = P();
-  const q = (store.ui.asq || '').toLowerCase().trim();
-  const act = p.active || {};
-  const nAct = Object.keys(act).filter(n => D.quests[n] && !isDone(n, p)).length;
-  const minLv = Math.max(0, ...Object.keys(act).filter(n => D.quests[n]).map(n => D.quests[n].minLevel || 0));
-  const llSel = (t) => {
-    if (!D.traders[t]?.ll?.length || t === 'Fence') return '';
-    const man = p.settings.ll?.[t];
-    const cur = traderLL(t, p);
-    return `<span class="as-ll small"><span class="muted">LL</span>${[1, 2, 3, 4].map(l => `<button class="as-llb ${man != null && +man === l ? 'on' : ''}" data-act="setll" data-t="${attr(t)}" data-l="${l}" aria-label="Loyalty level ${l}">${l}</button>`).join('')}${man == null ? `<span class="muted" data-tip="Estimated from your PMC level – set it to your real loyalty level">auto ${cur}</span>` : `<button class="linkbtn" data-act="setll" data-t="${attr(t)}" data-l="">auto</button>`}</span>`;
-  };
-  const groups = IX.traders.map(t => {
-    const names = (IX.byTrader[t] || []).filter(n => visible(D.quests[n], p) && (!q || n.toLowerCase().includes(q)));
-    if (!names.length) return '';
-    const nOn = names.filter(n => act[n] && !isDone(n, p)).length;
-    return `<div class="as-g"><div class="sub-h as-gh">${traderImg(t, 'mp-tr')} ${esc(t)} ${nOn ? `<span class="badge b-av">${nOn} open</span>` : ''}${llSel(t)}</div>${names.map(n => {
-      const done = isDone(n, p), on = !!act[n] && !done;
-      return `<label class="as-row ${done ? 'is-done' : ''} ${on ? 'on' : ''}"><input type="checkbox" data-active="${attr(n)}" ${on ? 'checked' : ''}> <span>${esc(n)}</span>${done ? ' <span class="small muted">done</span>' : ''}</label>`;
-    }).join('')}</div>`;
-  }).join('');
-  openPanel(`${icon('list', 'dr-ic')}<span>My open quests</span>`, `
-    <ol class="as-steps small">
-      <li>In the game open every trader's <b>Tasks</b> with <b>Show completed</b> and <b>Show locked</b> turned off, and set your <b>PMC level</b>: <input type="number" min="1" max="79" value="${p.settings.level}" data-set="level" class="as-lvl" aria-label="PMC level">${minLv > p.settings.level ? ` <span class="c-orange">your open quests need at least level ${minLv}</span>` : ''}</li>
-      <li>Tick <b>every</b> quest you see there. Also set the <b>loyalty level (LL)</b> you have with each of those traders – quests above your LL then count as "not unlocked yet" instead of finished.</li>
-      <li>Press <b>Apply – this is my full task list</b>.</li>
-    </ol>
-    <p class="small muted">Why the full list matters: many quests (e.g. Ragman's LL1 quests) have no quest before or after them, so the tracker can't tell from one open quest whether another one is finished. If it is not in your in-game list, it is finished – that's what the first button uses.</p>
-    <div class="as-bar">
-      <label class="search">${icon('search')}<input type="search" data-as="q" placeholder="Search quest name" value="${attr(store.ui.asq || '')}" aria-label="Search quests"></label>
-      <span class="small"><b>${nAct}</b> selected</span>
-    </div>
-    <div class="as-actions">
-      <button class="btn btn-p" data-act="active-apply" data-mode="strict" data-tip="For every trader you ticked quests for: anything the tracker thinks is available but is not in your list is counted as finished (repeated for follow-ups). Your ticks from before are replaced.">Apply – this is my full task list</button>
-      <button class="btn" data-act="active-apply" data-mode="replace" data-tip="Only marks the quests your open quests require (earlier parts, prerequisites). Everything else stays open.">Apply – only what they require</button>
-      <button class="btn" data-act="active-apply" data-mode="merge" data-tip="Keeps everything you already ticked and adds what the open quests require">Apply – keep my ticks</button>
-      <button class="btn btn-s" data-act="active-clear">Clear selection</button>
-    </div>
-    <div class="as-list">${groups || '<div class="empty small">No quest matches.</div>'}</div>`);
 }

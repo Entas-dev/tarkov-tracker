@@ -207,6 +207,11 @@ function buildIndexes() {
   if (Q['Collector']) addReq('Collector');
   IX.kappa = kap;
   IX.kappaSub = new Set(Object.values(Q).filter(q => q.kappa === 'sub').map(q => q.name));
+  // Lightkeeper: his tasks and the chains before them
+  const lk = new Set();
+  const addLk = (n) => { if (lk.has(n) || !Q[n]) return; lk.add(n); for (const g of Q[n].pre) { const c = rel(g); if (c.length === 1 && g.length === 1) addLk(c[0].q); } };
+  for (const q of Object.values(Q)) if (q.trader === 'Lightkeeper') addLk(q.name);
+  IX.lightkeeper = lk;
 
   // traders
   const traders = new Set(Object.values(Q).map(q => q.trader).filter(Boolean));
@@ -412,41 +417,104 @@ export function tourStepsFor(names, p = P()) {
 // strict: the in-game task list (Show completed off) shows EVERY unfinished quest of a trader, so for the traders
 // you entered anything the tracker considers available but you did not tick must be finished – repeated until
 // nothing changes (finishing one can make its follow-ups available). Level and loyalty gates stop the cascade.
-export function applyActiveQuests(mode = 'merge') {
-  const info = { level: null, strict: 0 };
-  store.update(p => {
-    if (mode === 'replace' || mode === 'strict') { p.quests = {}; }
-    const act = Object.keys(p.active || {}).filter(n => D.quests[n]);
-    for (const n of act) delete p.quests[n];
-    // an open quest proves you reached its level requirement
-    const minLv = Math.max(0, ...act.map(n => D.quests[n].minLevel || 0));
-    if (minLv > (p.settings.level || 1)) { p.settings.level = minLv; info.level = minLv; }
-    // …and the trader loyalty level it needs
-    info.ll = [];
-    for (const n of act) { const L = D.quests[n].ll; if (L?.trader && traderLL(L.trader, p) < L.level) { p.settings.ll = { ...(p.settings.ll || {}), [L.trader]: L.level }; info.ll.push(`${L.trader} LL${L.level}`); } }
-    const all = new Set();
-    for (const n of act) for (const m of prerequisiteClosure(n, p)) if (!p.active[m]) all.add(m);
-    for (const m of all) p.quests[m] = 1;
-    for (const id of tourStepsFor([...act, ...all], p)) p.chObj[`Tour|${id}`] = 1;
-    if (mode === 'strict') {
-      const traders = new Set(act.map(n => D.quests[n].trader));
-      // loyalty groups you have open quests in: groups above the highest open one are locked, not finished
-      const cap = {};
-      for (const n of act) for (const x of D.quests[n].vars || []) cap[x.v] = Math.max(cap[x.v] || 0, x.min);
-      for (let pass = 0; pass < 30; pass++) {
-        let changed = 0;
-        for (const n of IX.order) {
-          const q = D.quests[n];
-          if (p.quests[n] || p.active[n] || !traders.has(q.trader) || !visible(q, p)) continue;
-          if ((q.vars || []).some(x => cap[x.v] != null && x.min > cap[x.v])) continue;
-          if (questStatus(q, p).s !== 'available') continue;
-          p.quests[n] = 1; changed++; info.strict++;
-        }
-        if (!changed) break;
+// opts.noOpen: traders you said have nothing open (all their unlocked tasks are done) – they cascade too.
+// opts.done: quests you saw as "Completed" (e.g. on a screenshot) – kept done, with everything before them.
+// Works on any profile object (the setup preview runs it on a copy).
+export function computeActiveApply(p, mode = 'merge', { noOpen = [], done = [] } = {}) {
+  const info = { level: null, strict: 0, ll: [], closure: [], strictList: [], capped: [], choice: [], tour: 0 };
+  p.active = p.active || {};
+  if (mode === 'replace' || mode === 'strict') { p.quests = {}; p.autoBy = {}; }
+  const act = Object.keys(p.active).filter(n => D.quests[n]);
+  for (const n of act) delete p.quests[n];
+  const fin = done.filter(n => D.quests[n] && !p.active[n]);
+  // an open quest proves you reached its level requirement
+  const minLv = Math.max(0, ...act.map(n => D.quests[n].minLevel || 0));
+  if (minLv > (p.settings.level || 1)) { p.settings.level = minLv; info.level = minLv; }
+  // …and the trader loyalty level it needs
+  for (const n of act) { const L = D.quests[n].ll; if (L?.trader && traderLL(L.trader, p) < L.level) { p.settings.ll = { ...(p.settings.ll || {}), [L.trader]: L.level }; info.ll.push(`${L.trader} LL${L.level}`); } }
+  for (const n of fin) p.quests[n] = 1;
+  const all = new Set();
+  for (const n of [...act, ...fin]) for (const m of prerequisiteClosure(n, p)) if (!p.active[m] && !p.quests[m]) all.add(m);
+  for (const m of all) p.quests[m] = 1;
+  info.closure = [...all];
+  const tourIds = tourStepsFor([...act, ...fin, ...all], p);
+  // a trader you say has nothing open is unlocked in your game
+  const tour = D.chapters?.['Tour'];
+  for (const t of noOpen) { const g = IX.tourGates?.[t]; if (g && tour && !traderUnlocked(t, p)) for (const o of tour.objectives.slice(0, g.idx + 1)) if (!o.optional && !p.chObj[`Tour|${o.id}`] && !tourIds.includes(o.id)) tourIds.push(o.id); }
+  for (const id of tourIds) p.chObj[`Tour|${id}`] = 1;
+  info.tour = tourIds.length;
+  if (mode === 'strict') {
+    const traders = new Set([...act.map(n => D.quests[n].trader), ...noOpen]);
+    // loyalty groups you have open quests in: groups above the highest open one are locked, not finished
+    const cap = {};
+    for (const n of act) for (const x of D.quests[n].vars || []) cap[x.v] = Math.max(cap[x.v] || 0, x.min);
+    for (let pass = 0; pass < 30; pass++) {
+      let changed = 0;
+      for (const n of IX.order) {
+        const q = D.quests[n];
+        if (p.quests[n] || p.active[n] || !traders.has(q.trader) || !visible(q, p)) continue;
+        if (q.alts?.length || isPrestigeQuest(n)) continue; // either-or choices / prestige: absence proves nothing
+        if ((q.vars || []).some(x => cap[x.v] != null && x.min > cap[x.v])) continue;
+        if (questStatus(q, p).s !== 'available') continue;
+        p.quests[n] = 1; changed++; info.strict++; info.strictList.push(n);
       }
+      if (!changed) break;
     }
-  }, 'progress');
+    // unlocked in the tracker, but in a loyalty group above your open quests: finished or still locked – can't tell
+    const left = IX.order.filter(n => { const q = D.quests[n]; return !p.quests[n] && !p.active[n] && traders.has(q.trader) && visible(q, p) && !isPrestigeQuest(n) && questStatus(q, p).s === 'available'; });
+    info.choice = left.filter(n => D.quests[n].alts?.length); // you did one of them – or none yet
+    info.capped = left.filter(n => !D.quests[n].alts?.length && (D.quests[n].vars || []).some(x => cap[x.v] != null && x.min > cap[x.v]));
+  }
   return info;
+}
+export const isPrestigeQuest = (n) => /\(Prestige \d+\)$/.test(n);
+export function applyActiveQuests(mode = 'merge', opts = {}) {
+  let info = null;
+  store.update(p => { info = computeActiveApply(p, mode, opts); }, 'progress', `Open quests applied (${mode === 'strict' ? 'full task list' : mode === 'replace' ? 'only what they require' : 'kept ticks'})`);
+  return info;
+}
+// what applying would change – computed on a copy of the profile
+export function previewActiveApply(mode = 'strict', opts = {}) {
+  const p0 = P();
+  const c = JSON.parse(JSON.stringify(p0));
+  const info = computeActiveApply(c, mode, opts);
+  const doneAfter = Object.keys(c.quests).filter(n => c.quests[n] && D.quests[n]);
+  const removed = Object.keys(p0.quests).filter(n => p0.quests[n] && D.quests[n] && !c.quests[n]);
+  return { ...info, doneAfter, removed, profile: c };
+}
+
+// ---------- "which quests can be open right now" (setup assistant) ----------
+// quests that must be finished before one of `open` (they can't be open themselves)
+export function impliedDone(open, p = P()) {
+  const out = new Set();
+  for (const n of open) for (const m of prerequisiteClosure(n, p)) if (!open.includes(m)) out.add(m);
+  return out;
+}
+// quests that can only unlock after one of `open` is finished (so they can't be open either)
+export function impliedLater(open, p = P()) {
+  const later = new Set();
+  const blocked = (n) => open.includes(n) || later.has(n);
+  const dep = IX.graph[mode()].dep;
+  const queue = [...open];
+  while (queue.length) {
+    const n = queue.shift();
+    for (const d of dep[n] || []) {
+      if (later.has(d) || open.includes(d) || isDone(d, p)) continue;
+      const q = D.quests[d];
+      // some prerequisite group whose every option is still open / later and needs completion
+      const hit = preOf(q).some(g => g.some(a => a.q === n) && g.every(a => blocked(a.q) && a.type !== 'accept'));
+      if (hit) { later.add(d); queue.push(d); }
+    }
+  }
+  return later;
+}
+// can this quest show up as open in your game at your level / loyalty? (false = certainly not)
+export function plausibleOpen(q, p = P()) {
+  if (!visible(q, p) || isDone(q.name, p)) return false;
+  if (q.alts?.some(a => isDone(a, p))) return false;
+  if (q.minLevel && p.settings.level < q.minLevel) return false;
+  if (q.ll?.trader && traderLL(q.ll.trader, p) < q.ll.level) return false;
+  return true;
 }
 
 export function completeQuest(name) {
@@ -740,6 +808,7 @@ export function neededItems(sel, { includeCurrency = false, includeQuestItems = 
   const qset = new Set();
   if (sel.quests) for (const n of IX.order) qset.add(n);
   if (sel.kappa) for (const n of IX.kappa) qset.add(n);
+  if (sel.lightkeeper) for (const n of IX.lightkeeper || []) qset.add(n);
   IX.order.forEach((n, i) => {
     if (!qset.has(n)) return;
     const q = D.quests[n];

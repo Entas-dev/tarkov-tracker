@@ -223,10 +223,30 @@
         const e = pick(['Savior', 'Debtor', 'Survivor', 'Fallen']);
         action = `ending ${e}`; allowQ = new Set(); allowCh = new Set(); allowChObj = '-';
         await act({ act: 'ending', e });
-      } else if (r < 0.97) {
+      } else if (r < 0.95) {
         const h = store.history.length;
         if (h) { const k = Math.floor(rnd() * Math.min(h, 5)); action = `history undo #${k}`; await act({ act: 'hist-undo', i: String(k) }); }
         else action = 'history empty';
+      } else if (r < 0.97) {
+        // setup assistant: render every step on this random state, check the open-quests preview, close it
+        action = 'setup assistant walkthrough'; allowQ = new Set(); allowCh = new Set(); allowChObj = '-';
+        await act({ act: 'setup' });
+        if (!document.querySelector('.wiz')) problems.push('setup assistant did not open');
+        for (const id of [...document.querySelectorAll('.wiz-st')].map(b => b.dataset.s)) {
+          const eb = errors.length;
+          await act({ act: 'wz-go', s: id });
+          const txt = document.querySelector('.wiz-b')?.innerText || '';
+          const m = txt.match(/\bundefined\b|\bNaN\b|\[object Object\]/);
+          if (m) problems.push(`setup step ${id}: shows "${m[0]}"`);
+          if (txt.length < 30) problems.push(`setup step ${id}: nearly empty`);
+          if (errors.length > eb) problems.push(`setup step ${id}: ${errors.slice(eb).join(' | ').slice(0, 300)}`);
+        }
+        const pv = M.previewActiveApply('strict', {});
+        const act0 = Object.keys(store.p.active || {}).filter(n => store.p.active[n]);
+        if (pv.doneAfter.some(n => act0.includes(n))) problems.push('preview marks an open quest as done');
+        if ([...pv.capped, ...pv.choice].some(n => pv.profile.quests[n])) problems.push('preview: can\'t-tell quest is marked done');
+        await act({ act: 'wz-close' });
+        if (document.querySelector('.wiz')) problems.push('setup assistant did not close');
       } else {
         const id = pick(['pvp', 'seasonal', 'pve']);
         action = `profile ${id}`;

@@ -11,7 +11,7 @@ const blankProgress = () => ({
   hideout: {}, hcnt: {},
   ch: {}, chObj: {}, chStart: {}, autoBy: {},
   ach: {}, bp: {}, bpDocs: {}, prestige: {}, prestigeManual: {},
-  settings: { level: 1, faction: 'USEC', eod: false, unheard: false, ending: 'Savior', ll: {}, llAuto: true },
+  settings: { level: 1, faction: 'USEC', eod: false, unheard: false, ending: 'Savior', ll: {}, llAuto: true, goal: { story: true, kappa: true }, setupDone: false },
 });
 
 let state = load();
@@ -112,7 +112,7 @@ export const store = {
     for (const p of PROFILES) s.profiles[p.id] = merge(blankProgress(), j.profiles[p.id] || {});
     state = s; save(); emit('profile');
   },
-  resetProfile(id = state.active) { state.profiles[id] = blankProgress(); if (state.hist) state.hist[id] = []; save(); emit('profile'); },
+  resetProfile(id = state.active) { state.profiles[id] = blankProgress(); if (state.hist) state.hist[id] = []; if (state.ui.wiz) delete state.ui.wiz[id]; if (state.ui.srPlans) delete state.ui.srPlans[id]; save(); emit('profile'); },
 };
 
 function emit(reason) { for (const fn of listeners) { try { fn(reason); } catch (e) { console.error(e); } } }

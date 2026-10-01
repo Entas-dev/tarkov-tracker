@@ -84,6 +84,9 @@ export function perksNotesHtml(kind) {
 }
 
 export function openPerks() {
+  openPanel(`${icon('flag', 'dr-ic')}<span>Season perks</span>`, perksBodyHtml());
+}
+export function perksBodyHtml({ rewards: showRewards = true } = {}) {
   const p = P();
   const sel = p.settings.perks || {};
   const m = modifiers();
@@ -93,8 +96,8 @@ export function openPerks() {
       ${img(x.img, x.name, 'perk-big')}
       <span class="perk-b"><b>${esc(x.name)}</b>${x.points != null ? ` <span class="perk-pts ${x.points < 0 ? 'neg' : 'pos'}">${x.points > 0 ? '+' : ''}${x.points}</span>` : ''}<span class="small">${x.effectHtml}</span>${x.notesHtml ? `<span class="small muted">${x.notesHtml}</span>` : ''}${EFFECTS[x.name]?.note ? `<span class="small perk-eff">${icon('check')} Tracker: ${esc(EFFECTS[x.name].note)}</span>` : ''}</span>
     </label>`;
-  const rewards = D.season?.rewards || [];
-  const html = `
+  const rewards = showRewards ? D.season?.rewards || [] : [];
+  return `
     <p class="small muted">Tick the personal modifiers you picked for your seasonal character. Common modifiers always apply. Effects that change requirements (skills, Kappa, flea market, container) are applied in the other tabs.</p>
     <div class="perk-sum"><b>${pts.spent}</b> points spent on positive · <b>${pts.gained}</b> gained from negative · net <b>${pts.net >= 0 ? '+' : ''}${pts.net}</b></div>
     <div class="sub-h">Common modifiers (always active)</div><div class="perk-list">${m.common.map(x => row(x, 'common')).join('')}</div>
@@ -102,7 +105,6 @@ export function openPerks() {
     <div class="sub-h">Negative modifiers (give points)</div><div class="perk-list">${m.negative.map(x => row(x, 'negative')).join('')}</div>
     ${rewards.length ? `<div class="sub-h">Seasonal rewards</div><table class="tbl"><thead><tr><th>Reward</th><th>Type</th><th>Level</th><th>Quest</th></tr></thead><tbody>${rewards.map(r => `<tr><td><span class="rw">${img(r.img, r.name, 'perk-ic')}${esc(r.name)}</span></td><td>${esc(r.type)}</td><td>${r.level ?? '–'}</td><td>${D.quests[r.quest] ? qlink(r.quest) : esc(r.quest)}</td></tr>`).join('')}</tbody></table>` : ''}
     <p class="small muted">Source: <a href="https://escapefromtarkov.fandom.com/wiki/Seasons" target="_blank" rel="noopener">Seasons (wiki)</a></p>`;
-  openPanel(`${icon('flag', 'dr-ic')}<span>Season perks</span>`, html);
 }
 
 export function togglePerk(name, on) {

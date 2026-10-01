@@ -21,10 +21,14 @@ export function renderHideout(root) {
     <div class="head-stat">${progressBar(builtLv, totalLv, 'Module levels')}</div></div>
   ${perksNotesHtml('hideout')}
   <section class="panel hchk"><div class="panel-h"><h2>Checklist</h2><span class="small muted">Tick every level you have built. Required lower levels and modules are ticked automatically; built levels drop out of Needed Items.</span></div>
-    <div class="hchk-grid">${mods.map(m => { const lv = hLevel(m.name, p); return `<div class="hchk-row ${lv >= m.levels.length ? 'max' : ''}">${img(m.img, '', 'hchk-ic')}<span class="hchk-n">${esc(m.name)}</span><span class="hchk-bx">${m.levels.map(L => { const on = L.level <= lv; const rdy = !on && L.level === lv + 1 && levelReqStatus(m.name, L.level, p).ok; return `<button class="hchk-b ${on ? 'on' : ''} ${rdy ? 'rdy' : ''}" data-act="hcheck" data-m="${attr(m.name)}" data-l="${L.level}" aria-pressed="${on}" aria-label="${attr(m.name)} level ${L.level}" data-tip="${attr(`${m.name} level ${L.level}${on ? ' – built (click to unbuild)' : rdy ? ' – can be built now' : ''}`)}">${on ? icon('check') : L.level}</button>`; }).join('')}</span></div>`; }).join('')}</div>
+    ${hideoutChecklistHtml(p)}
   </section>
   <div class="filters"><div class="seg" role="radiogroup" aria-label="Filter">${[['all', 'All modules'], ['open', 'Not maxed'], ['ready', 'Next level unlockable']].map(([v, l]) => `<button role="radio" aria-checked="${f === v}" class="seg-b ${f === v ? 'on' : ''}" data-act="hf" data-v="${v}">${l}</button>`).join('')}</div></div>
   <div class="hgrid">${list.map(m => moduleCard(m)).join('')}</div>`;
+}
+
+export function hideoutChecklistHtml(p = P()) {
+  return `<div class="hchk-grid">${D.hideout.modules.map(m => { const lv = hLevel(m.name, p); return `<div class="hchk-row ${lv >= m.levels.length ? 'max' : ''}">${img(m.img, '', 'hchk-ic')}<span class="hchk-n">${esc(m.name)}</span><span class="hchk-bx">${m.levels.map(L => { const on = L.level <= lv; const rdy = !on && L.level === lv + 1 && levelReqStatus(m.name, L.level, p).ok; return `<button class="hchk-b ${on ? 'on' : ''} ${rdy ? 'rdy' : ''}" data-act="hcheck" data-m="${attr(m.name)}" data-l="${L.level}" aria-pressed="${on}" aria-label="${attr(m.name)} level ${L.level}" data-tip="${attr(`${m.name} level ${L.level}${on ? ' – built (click to unbuild)' : rdy ? ' – can be built now' : ''}`)}">${on ? icon('check') : L.level}</button>`; }).join('')}</span></div>`; }).join('')}</div>`;
 }
 
 function moduleCard(m) {
@@ -144,12 +148,15 @@ export function renderAchievements(root) {
 }
 
 // ---------------- NEEDED ITEMS ----------------
-const IDEF = { story: true, kappa: false, quests: true, hideout: true, currency: false, questItems: false, optional: false, gunsmith: true, gsAll: false, q: '', showDone: false };
-export const itemFilter = () => ({ ...IDEF, ...(ui().if2 || {}) });
+const IDEF = { currency: false, questItems: false, optional: false, gunsmith: true, gsAll: false, q: '', showDone: false };
+// goals (what Needed Items counts) belong to the profile – set in the setup assistant, default Story + Kappa
+export const GOAL_KEYS = ['story', 'kappa', 'lightkeeper', 'quests', 'hideout'];
+export const goalOf = (p = P()) => { const g = p.settings.goal || { story: true, kappa: true }; return Object.fromEntries(GOAL_KEYS.map(k => [k, !!g[k]])); };
+export const itemFilter = () => { const f = { ...IDEF, ...(ui().if2 || {}) }; for (const k of GOAL_KEYS) delete f[k]; return { ...f, ...goalOf() }; };
 export const itemView = () => ui().iv || 'fit';
 export function itemList() {
   const f = itemFilter();
-  return neededItems({ story: f.story, kappa: f.kappa, quests: f.quests, hideout: f.hideout }, { includeCurrency: f.currency, includeQuestItems: f.questItems, includeOptional: f.optional, gunsmith: f.gunsmith, gunsmithAll: f.gsAll });
+  return neededItems({ story: f.story, kappa: f.kappa, lightkeeper: f.lightkeeper, quests: f.quests, hideout: f.hideout }, { includeCurrency: f.currency, includeQuestItems: f.questItems, includeOptional: f.optional, gunsmith: f.gunsmith, gunsmithAll: f.gsAll });
 }
 const PRIO = [[3, 'Needed now', 'open quests you can do now and the next hideout level you can build'], [2, 'Next up', 'story, next hideout levels once their requirements are met'], [1, 'Later', 'locked quests and later hideout levels']];
 export const srcLabel = (s) => (s.type === 'hideout' ? `${s.name} L${s.level}${s.story ? ' (story)' : ''}` : s.type === 'gunsmith' ? `${s.name} – build part` : s.name);
@@ -196,6 +203,7 @@ export function goalToggles(f, compact = false) {
   return `<div class="seg multi" role="group" aria-label="Goals">
       ${tog('story', 'Story', 'Chapters you need for your ending – including the hideout levels the story requires')}
       ${tog('kappa', 'Kappa', 'All Kappa-required quests incl. Collector')}
+      ${tog('lightkeeper', compact ? 'LK' : 'Lightkeeper', 'Lightkeeper\'s tasks and the quest chains before them')}
       ${tog('quests', compact ? 'Quests' : 'All quests', 'Every unfinished quest')}
       ${tog('hideout', 'Hideout', 'Every hideout level you have not built')}
       ${compact ? '' : '<button class="seg-b" data-act="ifall" data-tip="Story + all quests + hideout">All</button>'}
@@ -229,7 +237,7 @@ export function renderItems(root) {
     return `<section class="ig-sec"><h2 class="ig-h">${title} <span class="muted small">${list.length} items · ${hint}</span></h2>
       ${view === 'list' ? `<div class="ilist">${list.map(row).join('')}</div>` : `<div class="ig-grid">${list.map(a => itemTile(a)).join('')}</div>`}</section>`;
   };
-  const any = f.story || f.kappa || f.quests || f.hideout;
+  const any = f.story || f.kappa || f.lightkeeper || f.quests || f.hideout;
   root.innerHTML = `
   <div class="tab-head"><div><h1>Needed Items</h1><p class="lede">Everything you still need for the goals you pick. Click an item to tick it (or set how many you have) – most urgent first.</p></div>
     <div class="head-stat"><div class="stat"><b>${open.length}</b> items · <b>${fmt(open.reduce((s, a) => s + a.need - a.have, 0))}</b> pieces · <b class="c-red">${fmt(firTotal)}</b> must be FiR</div></div></div>

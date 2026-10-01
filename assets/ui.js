@@ -32,6 +32,7 @@ export function icon(name, cls = '') {
     expand: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
     list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
     flag: '<path d="M5 21V4M5 4h11l-2 4 2 4H5"/>',
+    wand: '<path d="M4 20L15 9M15 9l2-2M13.5 4.5v2M18.5 9.5h2M17 4l1.4-1.4M19.5 6.5L21 5M11 3.5h1M20 13v1"/>',
   };
   return `<svg class="ic ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] || ''}</svg>`;
 }

@@ -3,7 +3,8 @@ from playwright.async_api import async_playwright
 N = int(sys.argv[1]) if len(sys.argv) > 1 else 120
 SEED = int(sys.argv[2]) if len(sys.argv) > 2 else 20260930
 LOG = sys.argv[3] if len(sys.argv) > 3 else 'stress.log'
-state = {"active": "pvp", "profiles": {"pvp": {"settings": {"level": 1, "faction": "USEC", "ending": "Savior", "ll": {}, "llAuto": True}}}, "ui": {}}
+# setupDone: the setup assistant has its own test (setup_e2e.py)
+state = {"active": "pvp", "profiles": {"pvp": {"settings": {"level": 1, "faction": "USEC", "ending": "Savior", "ll": {}, "llAuto": True, "setupDone": True}}, "seasonal": {"settings": {"setupDone": True}}, "pve": {"settings": {"setupDone": True}}}, "ui": {}}
 async def main():
     async with async_playwright() as p:
         proxy = os.environ.get('HTTPS_PROXY')

@@ -4,14 +4,15 @@ import { D, IX, setDataset, P, visible, isDone, completeQuest, autoChecked, setI
 import { esc, attr, icon, img, initTooltips, hideTip, confirmDialog, toast, $, $$ } from './ui.js';
 import { expanded, openQuestInfo, openChapterInfo, openItemInfo, openWikiPage, openModuleInfo, closeDrawer, openPanel } from './components.js';
 import { renderStory, renderKappa, renderTraders, renderQuests } from './tabs-quests.js';
-import { renderHideout, renderPrestige, renderBattlepass, renderAchievements, renderItems, itemFilter, itemList } from './tabs-other.js';
+import { renderHideout, renderPrestige, renderBattlepass, renderAchievements, renderItems, itemFilter, itemList, GOAL_KEYS, goalOf } from './tabs-other.js';
 import { loadDataset, buildLive, isStale, ageText, loadGameReqs } from './data.js';
 let gameReqs = null;
 import { initMapPanel, openMap, openMapLoot, undockMap, highlightItem, highlightedIndex } from './mappanel.js';
 import { renderInRaid } from './inraid.js';
 import { itemIndex } from './loot.js';
 import { perksBannerHtml, openPerks, togglePerk } from './perks.js';
-import { renderSpeedrun, openActiveSetup, recalcSpeedrun } from './speedrun.js';
+import { renderSpeedrun, recalcSpeedrun } from './speedrun.js';
+import { openSetup, maybeAutoSetup, activeOpts } from './setup.js';
 import { tsState, tsSet, initTaskKeys } from './tasks.js';
 
 const TABS = [
@@ -70,6 +71,7 @@ function renderHeader() {
   $('.hdr-ctrls').innerHTML = `
     <label class="lvl" data-tip="Your PMC level – used for the level filter and trader LL estimate">Lvl <input type="number" min="1" max="79" value="${p.settings.level}" data-set="level" aria-label="PMC level"></label>
     <select data-set="faction" aria-label="Faction"><option ${p.settings.faction === 'USEC' ? 'selected' : ''}>USEC</option><option ${p.settings.faction === 'BEAR' ? 'selected' : ''}>BEAR</option></select>
+    <button class="ibtn" data-act="setup" aria-label="Setup assistant" data-tip="Setup assistant – edition, goal, story, loyalty, open quests (screenshots), hideout">${icon('wand')}</button>
     <button class="ibtn" data-act="history" aria-label="History / undo" data-tip="History – undo any change">${icon('clock')}</button>
     <button class="ibtn" data-act="theme" aria-label="Toggle light/dark mode" data-tip="Light / dark">${icon(currentTheme() === 'dark' ? 'sun' : 'moon')}</button>
     <button class="ibtn" data-act="settings" aria-label="Settings" data-tip="Settings, backup, data update">${icon('gear')}</button>`;
@@ -270,7 +272,7 @@ async function settingsDialog() {
         <label class="tog"><input type="checkbox" id="s-series" ${p.settings.seriesLogic !== false ? 'checked' : ''}> When checking a quest, also check earlier parts of the same series (e.g. all lower-level <b>Gunsmith</b> quests)</label>
         <p class="small muted">Settings apply to the <b>${esc(store.profile.long)}</b> profile.</p>
         <div class="set-row"><button class="btn" data-x="export">${icon('download')} Export progress</button><button class="btn" data-x="import">${icon('upload')} Import progress</button><input type="file" id="s-file" accept="application/json" hidden></div>
-        <div class="set-row"><button class="btn" data-x="refresh">${icon('refresh')} Update data from wiki now</button><button class="btn btn-d" data-x="reset">Reset this profile</button></div>
+        <div class="set-row"><button class="btn" data-x="setup">${icon('wand')} Setup assistant</button><button class="btn" data-x="refresh">${icon('refresh')} Update data from wiki now</button><button class="btn btn-d" data-x="reset">Reset this profile</button></div>
         <p class="small muted">Data built ${esc(ageText(D))}. The site also refreshes itself automatically once a day. Nothing here reads or touches the game.</p>
       </div>`,
     buttons: [{ label: 'Close', value: 'close', primary: true }],
@@ -289,6 +291,7 @@ function onSettingsClick(e) {
   }
   if (x === 'import') { const f = document.getElementById('s-file'); f.onchange = async () => { try { store.importJson(await f.files[0].text()); toast('Progress imported'); document.querySelector('.modal-wrap')?.remove(); } catch (err) { toast('Import failed: ' + esc(err.message)); } }; f.click(); }
   if (x === 'refresh') { document.querySelector('.modal-wrap')?.remove(); refreshData(true); }
+  if (x === 'setup') { document.querySelector('.modal-wrap')?.remove(); openSetup('start'); }
   if (x === 'reset') { if (confirm(`Reset all progress of the ${store.profile.long} profile?`)) { store.resetProfile(); document.querySelector('.modal-wrap')?.remove(); } }
 }
 document.addEventListener('change', (e) => {
@@ -384,14 +387,15 @@ function onClick(e) {
     case 'ch-start': { const c = b.dataset.c; store.update(pp => { pp.chStart = pp.chStart || {}; if (pp.chStart[c]) delete pp.chStart[c]; else pp.chStart[c] = 1; }, 'progress', `${c}: storyline ${P().chStart?.[c] ? 'not started' : 'started'}`); break; }
     case 'hcheck': { const m = b.dataset.m, l = +b.dataset.l; setHideout(m, hLevel(m) >= l ? l - 1 : l, true); break; }
     case 'hf': store.setUi('hf', b.dataset.v); render(); break;
-    case 'active-setup': (lastDrawer = openActiveSetup)(); break;
+    case 'active-setup': hideTip(); closeDrawer(); lastDrawer = null; openSetup('quests'); break;
+    case 'setup': hideTip(); openSetup('start'); break;
     case 'active-apply': {
       const n = Object.keys(P().active || {}).filter(x => D.quests[x] && !isDone(x)).length;
       if (!n) { toast('Tick at least one open quest first'); break; }
       undoSnap = snapshot();
       const before = Object.keys(P().quests).length;
       recalcSpeedrun(); // the render triggered by the progress update plans from scratch
-      const info = applyActiveQuests(b.dataset.mode);
+      const info = applyActiveQuests(b.dataset.mode, activeOpts());
       const after = Object.keys(P().quests).length;
       withUndo(`${n} open quest${n > 1 ? 's' : ''} set · ${after} quests now marked done${b.dataset.mode === 'merge' ? ` (+${Math.max(0, after - before)})` : ''}${info.strict ? ` · ${info.strict} not in your task list → finished` : ''}${info.level ? ` · level set to ${info.level}` : ''}${info.ll?.length ? ` · ${info.ll.join(', ')} set` : ''} · Speedrun plan updated`);
       break;
@@ -408,8 +412,12 @@ function onClick(e) {
     case 'ach': store.update(pp => { const n = b.dataset.a; if (pp.ach[n]) delete pp.ach[n]; else pp.ach[n] = 1; }); break;
     case 'asec': { const f = store.ui.af || { sec: [...new Set(D.achievements.map(x => x.section))].filter(s => !/arena|retired/i.test(s)), status: 'all', q: '' }; const s = new Set(f.sec); s.has(b.dataset.v) ? s.delete(b.dataset.v) : s.add(b.dataset.v); store.setUi('af', { ...f, sec: [...s] }); render(); break; }
     case 'iscope': store.setUi('if', { ...(store.ui.if || {}), scope: b.dataset.v }); render(); break;
-    case 'ifx': { const f = itemFilter(); store.setUi('if2', { ...f, [b.dataset.k]: !f[b.dataset.k] }); render(); break; }
-    case 'ifall': store.setUi('if2', { ...itemFilter(), story: true, quests: true, hideout: true }); render(); break;
+    case 'ifx': {
+      const k = b.dataset.k;
+      if (GOAL_KEYS.includes(k)) { store.update(pp => { pp.settings.goal = { ...goalOf(pp), [k]: !goalOf(pp)[k] }; }, 'settings'); break; }
+      const f = itemFilter(); store.setUi('if2', { ...f, [k]: !f[k] }); render(); break;
+    }
+    case 'ifall': store.update(pp => { pp.settings.goal = { ...goalOf(pp), story: true, quests: true, hideout: true }; }, 'settings'); break;
     case 'ifv': store.setUi('iv', b.dataset.v); render(); break;
     case 'ir-click': store.setUi('irClick', b.dataset.v); store.setUi('ipop', null); render(); break;
     case 'ir-hl': {
@@ -444,7 +452,6 @@ function onInput(e) {
   if (el.dataset.tsopt) { tsSet(el.dataset.id, { [el.dataset.tsopt]: el.checked }); render(); return; }
   if (el.dataset.tsmap != null) { tsSet(el.dataset.tsmap, { map: el.value }); render(); return; }
   if (el.dataset.tsq != null) { tsSet(el.dataset.tsq, { q: el.value }); clearTimeout(searchT); searchT = setTimeout(render, 160); return; }
-  if (el.dataset.as) { store.setUi('asq', el.value); clearTimeout(searchT); searchT = setTimeout(() => { const pos = el.selectionStart; openActiveSetup(); const ni = document.querySelector('input[data-as]'); if (ni) { ni.focus(); try { ni.setSelectionRange(pos, pos); } catch { } } }, 150); return; }
   if (el.dataset.set === 'level') { const v = Math.max(1, Math.min(79, parseInt(el.value, 10) || 1)); store.update(p => { p.settings.level = v; }); return; }
   const fp = el.closest('[data-fprefix]')?.dataset.fprefix;
   const setF = (bucket, key, val, isText) => {
@@ -470,7 +477,7 @@ async function boot() {
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeDrawer(); lastDrawer = null; hideTip(); if (store.ui.ipop) { store.setUi('ipop', null); render(); } } });
   addEventListener('hashchange', route);
   matchMedia('(prefers-color-scheme: light)').addEventListener?.('change', () => renderHeader());
-  store.on((reason) => { render(); if (reason === 'profile' || reason === 'perks') { renderBanner(); } });
+  store.on((reason) => { render(); if (reason === 'profile' || reason === 'perks') { renderBanner(); } if (reason === 'profile') maybeAutoSetup(); });
 
   $('#main').innerHTML = `<div class="boot"><div class="boot-t">Loading quest data…</div><div class="rb"><div class="rb-f" style="width:10%"></div></div></div>`;
   let [ds, gr] = await Promise.all([loadDataset(), loadGameReqs()]);
@@ -488,6 +495,7 @@ async function boot() {
   route();
   renderBanner();
   renderFooter();
+  maybeAutoSetup(); // first start of this profile / after a reset
   if (isStale(ds)) refreshData(false); // background auto-update
 }
 
