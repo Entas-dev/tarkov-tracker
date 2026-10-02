@@ -131,6 +131,20 @@
       const m = txt.match(/\bundefined\b|\bNaN\b|\[object Object\]/);
       if (m) problems.push(`tab ${t}: shows "${m[0]}" …${txt.slice(Math.max(0, m.index - 60), m.index + 20).replace(/\s+/g, ' ')}`);
       if (errors.length > before) problems.push(`tab ${t}: ${errors.slice(before).join(' | ').slice(0, 300)}`);
+      // Speedrun / In-Raid: Story + Kappa quests first, side quests (own colour) only below the divider
+      if (t === 'speedrun' || t === 'raid') {
+        const f = M.focusQuests();
+        for (const rb of main.querySelectorAll('.raid-b')) {
+          let seenSide = false;
+          for (const el of rb.children) {
+            if (el.classList.contains('raid-side-h')) { seenSide = true; continue; }
+            const n = el.querySelector('.raid-qh [data-q]')?.dataset.q;
+            if (!n || el.classList.contains('story-q')) continue;
+            if (seenSide !== !f.has(n)) { problems.push(`${t}: ${n} is ${f.has(n) ? 'a Kappa quest in the side section' : 'a side quest above the divider'}`); break; }
+            if (el.classList.contains('side') === f.has(n)) { problems.push(`${t}: ${n} has the wrong colour`); break; }
+          }
+        }
+      }
     }
     // Needed Items: every view; In-Raid: map docked; history drawer
     for (const v of ['grid', 'list', 'fit']) { store.setUi('iv', v); location.hash = '#/items'; await sleep(5); location.hash = '#/story'; await sleep(20); location.hash = '#/items'; await sleep(25); }
@@ -210,6 +224,24 @@
         store.update(p => { p.active = {}; for (const q of sel) p.active[q.name] = 1; });
         await act({ act: 'active-apply', mode });
         for (const q of sel) if (!M.isDone(q.name) && M.questStatus(q).s !== 'available') problems.push(`open quest ${q.name} not available after apply`);
+        if (mode === 'strict') {
+          // a full task list: afterwards nothing but the ticked quests counts as available
+          const act0 = new Set(Object.keys(store.p.active).filter(n => store.p.active[n]));
+          const extra = quests().filter(q => !act0.has(q.name) && M.questStatus(q).s === 'available').map(q => q.name);
+          if (extra.length) problems.push(`full list applied, but also available: ${extra.slice(0, 6).join(', ')}`);
+        }
+      } else if (r < 0.83) {
+        // game edition: Stash / Cultist Circle levels it includes count as built, without building what they require
+        const ed = pick(['std', 'lb', 'pfe', 'eod', 'unheard']);
+        action = `edition ${ed}`; allowQ = new Set(); allowCh = new Set(); allowChObj = '-';
+        const hb = JSON.stringify(store.p.hideout);
+        store.update(p => { p.settings.edition = ed; p.settings.eod = ed === 'eod' || ed === 'unheard'; p.settings.unheard = ed === 'unheard'; }, 'settings');
+        if (JSON.stringify(store.p.hideout) !== hb) problems.push('edition change touched the built hideout levels');
+        const want = { std: 1, lb: 2, pfe: 3, eod: 4, unheard: 4 }[ed];
+        if (M.hLevel('Stash') < want) problems.push(`edition ${ed}: Stash level ${M.hLevel('Stash')} < ${want}`);
+        if (ed === 'unheard' && M.hLevel('Cultist Circle') < 1) problems.push('Unheard: Cultist Circle not built');
+        const st = M.neededItems({ hideout: true }).filter(a => a.sources.some(x => x.type === 'hideout' && x.name === 'Stash' && x.level <= want));
+        if (st.length) problems.push(`Needed Items still lists Stash levels your edition includes: ${st[0].item}`);
       } else if (r < 0.86) {
         const v = 1 + Math.floor(rnd() * 79);
         action = `level ${v}`; allowQ = new Set(); allowCh = new Set(); allowChObj = '-';

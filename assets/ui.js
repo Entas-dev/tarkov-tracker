@@ -1,5 +1,5 @@
 // Shared UI helpers & components
-import { D, IX, P, questStatus, isDone, visible, traderLL, traderUnlocked, questMapsUnlocked, questNeeds, isSeasonal, preOf, groupSatisfied, questObjProgress, varNeed, varText, chReqMet } from './model.js';
+import { D, IX, P, questStatus, isDone, visible, traderLL, traderUnlocked, questMapsUnlocked, questNeeds, isSeasonal, preOf, groupSatisfied, questObjProgress, varNeed, varText, chReqMet, repMet } from './model.js';
 
 export const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 export const attr = esc;
@@ -94,6 +94,9 @@ export function questTooltip(name) {
     const sat = groupSatisfied(g, p);
     rows.push(`${ok(sat)} ${g.map(a => `${a.type === 'accept' ? 'Accept ' : a.type === 'fail' ? 'Fail ' : ''}<b>${esc(a.q)}</b>${a.delay ? ` <span class="muted">(+${esc(a.delay)})</span>` : ''}`).join(' <span class="muted">or</span> ')}`);
   }
+  for (const r of q.rep || []) if (r.cmp === '>=' || r.cmp === '>') { const m = repMet(r, p); rows.push(`${m === true ? ok(true) : m === false ? ok(false) : '<span class="t-dot">?</span>'} ${esc(r.trader)} reputation ${r.value} <span class="muted">(${m == null ? 'enter yours in the setup assistant → Loyalty' : `yours: ${esc(p.settings.rep[r.trader])}`})</span>`); }
+  if (q.cond) rows.push(`<span class="t-dot">!</span> ${esc(q.cond)}`);
+  if (p.notOpen?.[q.name] && !p.active?.[q.name] && !isDone(name, p)) rows.push(`<span class="t-no">${icon('x')}</span> Not in your task list – ${esc(p.notOpen[q.name])}. Tick it done, or mark it open if you have it.`);
   if (q.faction) rows.push(`${ok(p.settings.faction === q.faction)} ${q.faction} only`);
   if (q.edition) rows.push(`${ok(q.edition === 'EOD' ? p.settings.eod : p.settings.unheard)} ${q.edition === 'EOD' ? 'Edge of Darkness' : 'The Unheard'} edition`);
   for (const r of q.reqHtml) if (!/level|loyalty|must complete|unlocks|obtainable|edition|must accept|playing in/i.test(r.html.replace(/<[^>]+>/g, '')) && !(q.chReq || []).some(c => c.html === r.html)) rows.push(`<span class="t-dot">•</span> ${r.html}`);

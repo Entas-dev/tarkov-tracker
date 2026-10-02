@@ -9,7 +9,7 @@ export const PROFILES = [
 const blankProgress = () => ({
   quests: {}, active: {}, obj: {}, cnt: {},
   hideout: {}, hcnt: {},
-  ch: {}, chObj: {}, chStart: {}, autoBy: {},
+  ch: {}, chObj: {}, chStart: {}, autoBy: {}, notOpen: {},
   ach: {}, bp: {}, bpDocs: {}, prestige: {}, prestigeManual: {},
   settings: { level: 1, faction: 'USEC', eod: false, unheard: false, ending: 'Savior', ll: {}, llAuto: true, goal: { story: true, kappa: true }, setupDone: false },
 });
@@ -42,12 +42,12 @@ function save() {
 }
 
 // ---------- change history (per profile, small diffs, undo to any point) ----------
-const TRACK = ['quests', 'active', 'obj', 'cnt', 'hideout', 'hcnt', 'ch', 'chObj', 'chStart', 'ach', 'bp', 'bpDocs', 'prestige', 'prestigeManual', 'autoBy'];
+const TRACK = ['quests', 'active', 'obj', 'cnt', 'hideout', 'hcnt', 'ch', 'chObj', 'chStart', 'ach', 'bp', 'bpDocs', 'prestige', 'prestigeManual', 'autoBy', 'notOpen'];
 const HIST_MAX = 60;
 function snapMaps(p) {
   const o = {};
   for (const k of TRACK) o[k] = { ...(p[k] || {}) };
-  o.level = p.settings.level; o.ll = { ...(p.settings.ll || {}) }; o.choices = { ...(p.settings.choices || {}) };
+  o.level = p.settings.level; o.ll = { ...(p.settings.ll || {}) }; o.choices = { ...(p.settings.choices || {}) }; o.rep = { ...(p.settings.rep || {}) };
   return o;
 }
 function diffMaps(b, p) {
@@ -56,13 +56,14 @@ function diffMaps(b, p) {
   for (const k of TRACK) cmp(k, b[k], p[k] || {});
   cmp('$ll', b.ll, p.settings.ll || {});
   cmp('$choices', b.choices, p.settings.choices || {});
+  cmp('$rep', b.rep, p.settings.rep || {});
   if (b.level !== p.settings.level) { ch.$level = b.level; n++; }
   return n ? { ch, n } : null;
 }
 function revert(p, ch) {
   for (const [k, vals] of Object.entries(ch)) {
     if (k === '$level') { p.settings.level = vals; continue; }
-    const tgt = k === '$ll' ? (p.settings.ll = p.settings.ll || {}) : k === '$choices' ? (p.settings.choices = p.settings.choices || {}) : (p[k] = p[k] || {});
+    const tgt = k === '$ll' ? (p.settings.ll = p.settings.ll || {}) : k === '$choices' ? (p.settings.choices = p.settings.choices || {}) : k === '$rep' ? (p.settings.rep = p.settings.rep || {}) : (p[k] = p[k] || {});
     for (const [key, v] of Object.entries(vals)) { if (v === null) delete tgt[key]; else tgt[key] = v; }
   }
 }

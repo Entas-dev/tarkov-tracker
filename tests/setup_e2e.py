@@ -72,10 +72,7 @@ async def main():
         await page.click('[data-act=wz-go][data-s=quests]')
         await page.set_input_files('#wz-file', files)
         await page.wait_for_function(f'document.querySelectorAll(".wq-job").length === {len(files)} && ![...document.querySelectorAll(".wq-job .rb")].length', timeout=300000, polling=500)
-        for t in sim['traders']:
-            if t not in sim['byT']:
-                await page.click(f'[data-act=wz-tr][data-t="{t}"]')
-                await page.click(f'.wq-th [data-act=wz-noopen][data-t="{t}"]')
+        # traders without open quests need nothing: the full list covers every trader
         res = await page.evaluate("""async (sim) => {
           const M = await import('/assets/model.js'); const { store } = await import('/assets/store.js');
           const act = Object.keys(store.p.active).filter(n => store.p.active[n]);
@@ -98,18 +95,38 @@ async def main():
         print('   why missing:', cmp['why'])
         print(f"after apply: level {cmp['level']} | done missing {len(cmp['missing'])} {cmp['missing'][:12]} | done extra {len(cmp['extra'])} {cmp['extra'][:12]} | open not available {cmp['openNotAvail'][:8]}")
         # the ones left open must be exactly the "can't tell" (loyalty group) list; ticking them there makes it exact
-        cap = await page.evaluate("async () => { const M = await import('/assets/model.js'); const S = await import('/assets/setup.js'); const pv = M.previewActiveApply('strict', S.activeOpts()); return [...pv.capped, ...pv.choice]; }")
-        notcap = [n for n in cmp['missing'] if n not in cap]
-        print(f"can't-tell list: {len(cap)} · missing done outside it: {notcap}")
-        for n in cmp['missing']:
-            if n in cap:
-                await page.click(f'[data-act=wz-done][data-q="{n}"]')
-        if cmp['missing']:
+        # tick the finished ones in the "can't tell" list (as the player would), apply again – repeat while it grows
+        missing, notcap = cmp['missing'], []
+        for rnd in range(4):
+            if not missing: break
+            cap = await page.evaluate("async () => { const M = await import('/assets/model.js'); const S = await import('/assets/setup.js'); const pv = M.previewActiveApply('strict', S.activeOpts()); return [...pv.capped, ...pv.choice, ...pv.unsure.map(u => u.n)]; }")
+            locked = [n for n in missing if n not in cap]
+            tick = [n for n in missing if n in cap]
+            print(f"round {rnd + 1}: can't-tell list {len(cap)} · ticking {len(tick)} · still locked behind them: {len(locked)}")
+            if not tick: notcap = locked; break
+            for n in tick: await page.click(f'[data-act=wz-done][data-q="{n}"]')
             await page.click('[data-act=wz-apply][data-mode=strict]'); await page.wait_for_timeout(300)
             cmp2 = await page.evaluate("async (sim) => { const { store } = await import('/assets/store.js'); const p = store.p; const T = new Set(sim.done); return { missing: sim.done.filter(n => !p.quests[n]), extra: Object.keys(p.quests).filter(n => p.quests[n] && !T.has(n)) }; }", sim)
-            print('after ticking them:', cmp2)
-            cmp['extra'] += cmp2['extra']; notcap += cmp2['missing']
+            cmp['extra'] += cmp2['extra']; missing = cmp2['missing']
+        notcap = notcap or missing
+        print('missing after resolving:', notcap)
         await page.screenshot(path=f'{OUT}/apply_{SEED}.png')
+        # afterwards only your open quests count as available – also for the Speedrun plan
+        chk = await page.evaluate("""async () => {
+          const M = await import('/assets/model.js'); const SR = await import('/assets/speedrun.js'); const { store } = await import('/assets/store.js');
+          const p = store.p, D = M.D;
+          const act = Object.keys(p.active).filter(n => p.active[n] && !p.quests[n]);
+          const avail = M.IX.order.filter(n => M.visible(D.quests[n]) && M.questStatus(D.quests[n]).s === 'available');
+          const extra = avail.filter(n => !act.includes(n));
+          const plan = SR.planRaids({ maxRaids: 3, expPerRaid: 4000 });
+          const now = (n) => M.questStatus(D.quests[n]).s === 'available';
+          const r1 = (plan.raids[0]?.entries || []).filter(e => e.kind === 'quest' && !act.includes(e.q.name) && now(e.q.name)).map(e => e.q.name);
+          const RAID = new Set(['kill', 'visit', 'mark', 'place', 'extract', 'use']);
+          const handin = plan.prelude.done.filter(m => D.quests[m].objectives.some(o => !o.optional && RAID.has(o.kind) && !p.obj[m + '|' + o.id]));
+          return { extra, r1, handin, raids: plan.raids.length };
+        }""")
+        print(f"available but not open: {chk['extra'][:8]} | Speedrun raid 1 extra: {chk['r1'][:6]} | 'hand in now' with raid work left: {chk['handin'][:6]} | {chk['raids']} raids planned")
+        cmp['extra'] += chk['extra'] + chk['r1'] + chk['handin']
         # finish, reload: assistant must stay closed; reset: it opens again
         await page.click('[data-act=wz-go][data-s=done]')
         await page.click('.wiz-f [data-act=wz-finish]')

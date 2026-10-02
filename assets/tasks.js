@@ -51,6 +51,9 @@ function lockHint(q, st, p) {
   if (r.k === 'map') return (r.maps || [])[0] || 'map';
   if (r.k === 'pre') { const a = r.g?.[0]; return a ? `after ${a.q.length > 22 ? a.q.slice(0, 21) + '…' : a.q}` : ''; }
   if (r.k === 'chapter') return r.c.ch;
+  if (r.k === 'notopen') return 'not in your list';
+  if (r.k === 'cond') return 'event only';
+  if (r.k === 'rep') return `${r.r.trader} rep ${r.r.value}`;
   return '';
 }
 

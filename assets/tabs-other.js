@@ -1,6 +1,6 @@
 // Hideout, Prestige, BattlePass, Achievements, Items tabs
 import { store } from './store.js';
-import { D, IX, P, hLevel, moduleMax, levelReqStatus, hcntKey, isSeasonal, isPvE, isDone, chDone, traderLL, shoppingList, questStatus, neededItems } from './model.js';
+import { D, IX, P, hLevel, moduleMax, levelReqStatus, hcntKey, isSeasonal, isPvE, isDone, chDone, traderLL, shoppingList, questStatus, neededItems, editionLevel, editionName } from './model.js';
 import { esc, attr, icon, img, qlink, itemChip, progressBar, fmt, statusBadge, traderImg } from './ui.js';
 import { expanded } from './components.js';
 import { skillReqStatus, perksNotesHtml } from './perks.js';
@@ -28,7 +28,8 @@ export function renderHideout(root) {
 }
 
 export function hideoutChecklistHtml(p = P()) {
-  return `<div class="hchk-grid">${D.hideout.modules.map(m => { const lv = hLevel(m.name, p); return `<div class="hchk-row ${lv >= m.levels.length ? 'max' : ''}">${img(m.img, '', 'hchk-ic')}<span class="hchk-n">${esc(m.name)}</span><span class="hchk-bx">${m.levels.map(L => { const on = L.level <= lv; const rdy = !on && L.level === lv + 1 && levelReqStatus(m.name, L.level, p).ok; return `<button class="hchk-b ${on ? 'on' : ''} ${rdy ? 'rdy' : ''}" data-act="hcheck" data-m="${attr(m.name)}" data-l="${L.level}" aria-pressed="${on}" aria-label="${attr(m.name)} level ${L.level}" data-tip="${attr(`${m.name} level ${L.level}${on ? ' – built (click to unbuild)' : rdy ? ' – can be built now' : ''}`)}">${on ? icon('check') : L.level}</button>`; }).join('')}</span></div>`; }).join('')}</div>`;
+  const edName = editionName(p);
+  return `<div class="hchk-grid">${D.hideout.modules.map(m => { const lv = hLevel(m.name, p); const ed = editionLevel(m.name, p); return `<div class="hchk-row ${lv >= m.levels.length ? 'max' : ''}">${img(m.img, '', 'hchk-ic')}<span class="hchk-n">${esc(m.name)}</span><span class="hchk-bx">${m.levels.map(L => { const on = L.level <= lv; const byEd = L.level <= ed; const rdy = !on && L.level === lv + 1 && levelReqStatus(m.name, L.level, p).ok; return byEd ? `<span class="hchk-b on ed" role="img" aria-label="${attr(`${m.name} level ${L.level} – comes with ${edName}`)}" data-tip="${attr(`${m.name} level ${L.level} – comes with your ${edName} edition, no upgrade needed`)}">${icon('star')}</span>` : `<button class="hchk-b ${on ? 'on' : ''} ${rdy ? 'rdy' : ''}" data-act="hcheck" data-m="${attr(m.name)}" data-l="${L.level}" aria-pressed="${on}" aria-label="${attr(m.name)} level ${L.level}" data-tip="${attr(`${m.name} level ${L.level}${on ? ' – built (click to unbuild)' : rdy ? ' – can be built now' : ''}`)}">${on ? icon('check') : L.level}</button>`; }).join('')}</span></div>`; }).join('')}</div>`;
 }
 
 function moduleCard(m) {

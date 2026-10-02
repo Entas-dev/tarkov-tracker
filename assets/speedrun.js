@@ -1,7 +1,7 @@
 // Speedrun planner: simulates your progression raid by raid and bundles every quest objective
 // (all traders + all story chapters) that can be done on the same map into one raid.
 import { store } from './store.js';
-import { D, IX, P, visible, questStatus, isDone, mapUnlocked, traderUnlocked, traderLL, varNeed, condStatus } from './model.js';
+import { D, IX, P, visible, questStatus, isDone, mapUnlocked, traderUnlocked, traderLL, varNeed, condStatus, hLevel, focusQuests, focusGates, helpsFocus } from './model.js';
 import { esc, attr, icon, img, traderImg, qlink, itemChip, fmt, progressBar } from './ui.js';
 import { openPanel } from './components.js';
 import { lootData, ensureLoot, lootState, neededLoot, lootForMap, whereText, itemImg, lootItem, bestMaps, mapDisplayName } from './loot.js';
@@ -26,9 +26,14 @@ function objType(q, o) {
     const questItem = (o.items || []).some(i => D.items[i.item]?.questItem);
     return (o.maps?.length || questItem) && maps.length ? 'raid' : 'loot';
   }
-  return maps.length ? 'raid' : 'menu';
+  if (maps.length) return 'raid';
+  // eliminate / extract / … "on any location": needs a raid, just not a particular map
+  return RAID_KINDS.has(o.kind) ? 'any' : 'menu';
 }
+const IN_RAID = new Set(['raid', 'any', 'flex']);
 const hasChildren = (list, o) => list.some(x => x.parent === o.id);
+// a quest objective whose sub-steps are all optional is itself the thing to do ("Mark any ATM" + optional locations)
+const hasReqKids = (list, o) => list.some(x => x.parent === o.id && !x.optional);
 const levelFor = (exp) => { let l = 1; for (const r of D.expTable || []) if (exp >= r.total) l = r.level; return l; };
 const expFor = (level) => (D.expTable || []).find(r => r.level === level)?.total || 0;
 
@@ -80,7 +85,7 @@ function chStepType(c, o, sp) {
   if (hasChildren(c.objectives, o)) return 'parent';
   const t = o.text || '';
   const hm = t.match(new RegExp(`(${MODS().join('|')})\\s*level\\s*(\\d)`, 'i'));
-  if (hm && /obtain|build|construct|upgrade|reach/i.test(t)) { const mod = MODS().find(m => m.toLowerCase() === hm[1].toLowerCase()); return (sp.hideout?.[mod] || 0) >= +hm[2] ? 'menu' : 'block'; }
+  if (hm && /obtain|build|construct|upgrade|reach/i.test(t)) { const mod = MODS().find(m => m.toLowerCase() === hm[1].toLowerCase()); return hLevel(mod, sp) >= +hm[2] ? 'menu' : 'block'; }
   const lm = t.match(/Loyalty Level (\d) with (\w[\w ]*)/i);
   if (lm) { const tr = Object.keys(D.traders).find(x => lm[2].toLowerCase().startsWith(x.toLowerCase())); return tr && traderLL(tr, sp) >= +lm[1] ? 'menu' : 'block'; }
   if (MENU_KINDS.has(o.kind) || MENU_TXT.test(t)) return 'menu';
@@ -126,25 +131,32 @@ function autoAdvance(sp, log) {
       const q = D.quests[n];
       if (sp.quests[n] || !visible(q, sp) || karmaQuest(q)) continue;
       if (questStatus(q, sp).s !== 'available') continue;
-      const req = q.objectives.filter(o => !o.optional && !hasChildren(q.objectives, o));
-      const raidLeft = req.filter(o => objType(q, o) === 'raid' && !objDoneIn(sp, n, o.id));
+      const req = q.objectives.filter(o => !o.optional && !hasReqKids(q.objectives, o));
+      const raidLeft = req.filter(o => IN_RAID.has(objType(q, o)) && !objDoneIn(sp, n, o.id));
       if (raidLeft.length) continue;
-      const lootLeft = req.filter(o => (objType(q, o) === 'loot' || objType(q, o) === 'flex') && !objDoneIn(sp, n, o.id));
+      const lootLeft = req.filter(o => objType(q, o) === 'loot' && !objDoneIn(sp, n, o.id));
       sp.quests[n] = 1; changed = true;
       if (lootLeft.length) log?.loot.push(n); else log?.done.push(n);
     }
   }
 }
 
-function candidates(sp) {
+function candidates(sp, { anyMap = false } = {}) {
   const cand = {}; // map -> [{kind:'quest'|'ch'|'start', …}]
   const add = (m, e) => { (cand[m] = cand[m] || []).push(e); };
+  const allMaps = anyMap ? IX.maps.filter(m => mapUnlocked(m, sp) && !/arena/i.test(m)) : [];
   for (const n of IX.order) {
     const q = D.quests[n];
     if (sp.quests[n] || !visible(q, sp) || karmaQuest(q) || questStatus(q, sp).s !== 'available') continue;
     const earlier = []; // undone raid objectives before this one: a later step can only share their raid (same map)
     for (const o of q.objectives) {
-      if (o.optional || objDoneIn(sp, n, o.id) || objType(q, o) !== 'raid' || hasChildren(q.objectives, o)) continue;
+      if (anyMap && !o.optional && !objDoneIn(sp, n, o.id) && !hasReqKids(q.objectives, o)) {
+        // planner: objectives for any map / one of several maps ride along in whichever raid fits best
+        const t = objType(q, o);
+        if (t === 'any') { for (const m of allMaps) add(m, { kind: 'quest', q, o, w: 0.3, any: true }); continue; }
+        if (t === 'flex') { const ms = (q.maps || []).filter(m => mapUnlocked(m, sp)); for (const m of ms) add(m, { kind: 'quest', q, o, w: 1 / Math.sqrt(Math.max(1, ms.length)) }); continue; }
+      }
+      if (o.optional || objDoneIn(sp, n, o.id) || objType(q, o) !== 'raid' || hasReqKids(q.objectives, o)) continue;
       const ms = objMaps(q, o).filter(m => mapUnlocked(m, sp) && earlier.every(e => objMaps(q, e).includes(m)));
       // an objective you can do on several maps counts less for each of them – exclusive objectives decide the map
       const w = 1 / Math.sqrt(Math.max(1, ms.length));
@@ -174,19 +186,22 @@ function candidates(sp) {
   return cand;
 }
 
-function scoreMap(entries, sp) {
+// Story + Kappa first: side quests only tip the balance (a little more when they count toward a loyalty group a
+// Kappa task still waits for)
+const questWeight = (q, fx) => (!fx ? 1 : fx.focus.has(q.name) ? 1 : helpsFocus(q, fx.gates) ? 0.45 : 0.18);
+function scoreMap(entries, sp, fx = null) {
   let s = 0;
   const perQuest = {};
   for (const e of entries) {
     if (e.kind === 'ch') { s += 4; continue; }
     if (e.kind === 'start') { s += 6; continue; }
-    s += (sp.active?.[e.q.name] ? 1.5 : 1) * (e.w ?? 1);
+    s += (sp.active?.[e.q.name] ? 1.5 : 1) * (e.w ?? 1) * questWeight(e.q, fx);
     (perQuest[e.q.name] = perQuest[e.q.name] || []).push(e.o.id);
   }
   for (const [n, ids] of Object.entries(perQuest)) {
     const q = D.quests[n];
-    const left = q.objectives.filter(o => !o.optional && !hasChildren(q.objectives, o) && objType(q, o) === 'raid' && !objDoneIn(sp, n, o.id) && !ids.includes(o.id));
-    if (!left.length) s += 1.5 + Math.min(2, (IX.graph.normal.dep[n]?.size || 0) * 0.3); // finishes the quest → unlocks follow-ups
+    const left = q.objectives.filter(o => !o.optional && !hasReqKids(q.objectives, o) && IN_RAID.has(objType(q, o)) && !objDoneIn(sp, n, o.id) && !ids.includes(o.id));
+    if (!left.length) s += (1.5 + Math.min(2, (IX.graph.normal.dep[n]?.size || 0) * 0.3)) * questWeight(q, fx); // finishes the quest → unlocks follow-ups
   }
   return s;
 }
@@ -214,8 +229,10 @@ export function planRaids({ maxRaids = 10, expPerRaid = 4000, lootNeeds = null }
   const raids = [];
   const pre = { story: [], done: [], loot: [], blocked: [] };
   autoAdvance(sp, pre);
+  const focus = focusQuests(base);
   for (let r = 0; r < maxRaids; r++) {
-    const cand = candidates(sp);
+    const fx = { focus, gates: focusGates(sp, focus) };
+    const cand = candidates(sp, { anyMap: true });
     const maps = Object.keys(cand);
     if (!maps.length) break;
     let best = null, bestScore = -1;
@@ -223,7 +240,7 @@ export function planRaids({ maxRaids = 10, expPerRaid = 4000, lootNeeds = null }
       const uniq = []; const seen = new Set();
       for (const e of cand[m]) { const k = ekey(e); if (!seen.has(k)) { seen.add(k); uniq.push(e); } }
       cand[m] = uniq;
-      const sc = scoreMap(uniq, sp) + lootBonus(m);
+      const sc = scoreMap(uniq, sp, fx) + lootBonus(m);
       if (sc > bestScore) { bestScore = sc; best = m; }
     }
     const entries = cand[best];
@@ -236,7 +253,7 @@ export function planRaids({ maxRaids = 10, expPerRaid = 4000, lootNeeds = null }
     const log = { story: [], done: [], loot: [], blocked: [] };
     autoAdvance(sp, log);
     // EXP only for quests actually finished through raid objectives – item/menu-only quests are assumed but not credited
-    const hasRaidObj = (n) => { const q = D.quests[n]; return q.objectives.some(o => !o.optional && objType(q, o) === 'raid'); };
+    const hasRaidObj = (n) => { const q = D.quests[n]; return q.objectives.some(o => !o.optional && IN_RAID.has(objType(q, o))); };
     const gained = log.done.filter(hasRaidObj).reduce((s, n) => s + (D.quests[n].exp || 0), 0) + expPerRaid;
     if (expPerRaid > 0) { exp += gained; sp.settings.level = Math.max(sp.settings.level, levelFor(exp)); }
     raids.push({ map: best, entries, turnIns: log.done, lootQuests: log.loot, storyAfter: log.story, level: levelBefore, levelAfter: sp.settings.level, score: bestScore });
@@ -278,7 +295,7 @@ function bringList(r) {
 }
 
 // ---------- stored plan (only recalculated on request) ----------
-const PLAN_V = 2;
+const PLAN_V = 4;
 function progressSig(p) {
   const keys = (o) => Object.keys(o || {}).filter(k => o[k]).sort().join(',');
   const str = [keys(p.quests), keys(p.obj), keys(p.ch), keys(p.chObj), keys(p.chStart), keys(p.active), JSON.stringify(p.hideout || {}), p.settings.level].join('|');
@@ -361,11 +378,13 @@ export function renderSpeedrun(root) {
     <button class="btn ${stale ? 'btn-p' : ''}" data-act="sr-recalc" data-tip="Plan again from your current progress">${icon('refresh')} Recalculate</button>
     <span class="small muted">planned ${agoText(stored.at)}</span>
   </div>
+  ${Object.keys(p.active || {}).some(n => p.active[n] && D.quests[n]) && p.settings.fullList !== 2 ? `<div class="notice">${icon('refresh')}<div>Your open quests were entered with an older version. <b>Apply them once more</b> (Set my open quests → Apply – this is my full task list): then only they count as available and quests you can't have leave the plan. <button class="btn btn-s btn-p" data-act="active-setup">Open</button></div></div>` : ''}
+  ${(() => { const no = Object.keys(p.notOpen || {}).filter(n => p.notOpen[n] && D.quests[n] && !isDone(n, p) && !p.active?.[n] && visible(D.quests[n], p)); return no.length ? `<div class="notice">${icon('info')}<div><b>${no.length}</b> quest${no.length > 1 ? 's' : ''} that were not in your task list stay out of the plan (finished or not unlocked yet – the list can't tell). <button class="btn btn-s" data-act="active-setup">Resolve them</button></div></div>` : ''; })()}
   ${stale ? `<div class="notice sr-stale">${icon('refresh')}<div>Your progress changed since this plan was made. Ticks show up here, but the raid order stays as it is until you press <b>Recalculate</b>. <button class="btn btn-s btn-p" data-act="sr-recalc">Recalculate now</button></div></div>` : ''}
   ${pr.story.length || pr.done.length || pr.loot.length || pr.blocked.length ? `<section class="panel sr-pre"><div class="panel-h"><h2>Right now, before your next raid</h2></div>
     ${pr.story.length ? `<div class="sub-h">Story steps at the traders</div><div class="sr-story">${storySteps(pr.story)}</div>` : ''}
-    ${pr.loot.length ? `<div class="sub-h">Collect the items and hand in</div><div class="chips">${pr.loot.map(n => `<span class="chip">${traderImg(D.quests[n].trader, 'chip-img')}${qlink(n)}</span>`).join('')}</div>` : ''}
-    ${pr.done.length ? `<div class="sub-h">Quests you can hand in</div><div class="chips">${pr.done.map(n => `<span class="chip">${traderImg(D.quests[n].trader, 'chip-img')}${qlink(n)}</span>`).join('')}</div>` : ''}
+    ${pr.loot.length ? `<div class="sub-h">Collect the items and hand in</div><div class="chips">${qChips(pr.loot, p)}</div>` : ''}
+    ${pr.done.length ? `<div class="sub-h">Quests you can hand in</div><div class="chips">${qChips(pr.done, p)}</div>` : ''}
     ${pr.blocked.length ? `<div class="sub-h">Story steps the plan can't place on a map</div><ul class="sr-blocked">${pr.blocked.map(b => `<li>${chIcon(b.c)} <b>${esc(b.c)}</b>: ${b.o.html} <span class="small muted">${b.t === 'block' ? '– needs a hideout level / trader loyalty first' : '– location not on the wiki page, see the guide'}${b.after ? ` (reached after raid ${b.after})` : ''}</span> <button class="btn btn-s" data-act="info-ch" data-c="${attr(b.c)}">${icon('info')} Guide</button></li>`).join('')}</ul>` : ''}</section>` : ''}
   <ol class="raids">${plan.raids.map((r, i) => {
     const chE = r.entries.filter(e => e.kind === 'ch');
@@ -379,14 +398,14 @@ export function renderSpeedrun(root) {
     const rDone = raidDone(r);
     const story = chE.length || startE.length;
     return `<li class="raid ${rDone ? 'raid-done' : ''} ${story ? 'raid-story' : ''}">
-      <div class="raid-h"><span class="raid-n">${i + 1}</span><div class="raid-t"><h2>${esc(r.map)}${story ? ' <span class="badge b-story">Storyline</span>' : ''}${rDone ? ' <span class="badge b-done">' + icon('check') + 'Done</span>' : ''}</h2><div class="small muted">${r.entries.length} objective${r.entries.length > 1 ? 's' : ''} · ${Object.keys(byQ).length} quest${Object.keys(byQ).length !== 1 ? 's' : ''}${Object.keys(byC).length ? ` + ${Object.keys(byC).join(', ')}` : ''} · est. level ${r.level}${r.levelAfter > r.level ? ` → ${r.levelAfter}` : ''}</div></div>
+      <div class="raid-h"><span class="raid-n">${i + 1}</span><div class="raid-t"><h2>${esc(r.map)}${story ? ' <span class="badge b-story">Storyline</span>' : ''}${rDone ? ' <span class="badge b-done">' + icon('check') + 'Done</span>' : ''}</h2><div class="small muted">${r.entries.length} objective${r.entries.length > 1 ? 's' : ''} · ${(() => { const f = focusQuests(p); const ks = Object.keys(byQ); const nf = ks.filter(n => f.has(n)).length, ns = ks.length - nf; return `${nf} Kappa${p.settings.goal?.lightkeeper ? '/LK' : ''} quest${nf !== 1 ? 's' : ''}${ns ? ` <span class="side-n">+ ${ns} side</span>` : ''}`; })()}${Object.keys(byC).length ? ` + ${Object.keys(byC).join(', ')}` : ''} · est. level ${r.level}${r.levelAfter > r.level ? ` → ${r.levelAfter}` : ''}</div></div>
         <button class="btn btn-s" data-act="map" data-map="${attr(r.map)}">${icon('map')} Map</button></div>
       ${bringHtml(br)}
       <div class="raid-b">${raidBodyHtml(r, p)}</div>
       ${lt.length ? `<div class="raid-loot"><div class="raid-lh">${icon('box')} <span class="small"><b>Grab on ${esc(r.map)}</b> – items you still need for quests / hideout that spawn here</span></div>
         ${ltTop.length ? `<div class="chips">${ltTop.map(x => lootChip(x, r.map)).join('')}</div>` : ''}
         ${ltRest.length ? `<details class="raid-more"><summary class="small">${ltTop.length ? 'More' : 'Items for later'} (${ltRest.length})</summary><div class="chips">${ltRest.map(x => lootChip(x, r.map)).join('')}</div></details>` : ''}</div>` : ''}
-      ${r.turnIns.length || r.storyAfter.length || r.lootQuests?.length ? `<div class="raid-after"><span class="small muted">After the raid:</span> ${storySteps(r.storyAfter)} ${r.turnIns.length ? `<span class="small">hand in ${r.turnIns.map(n => qlink(n)).join(', ')}</span>` : ''}${r.lootQuests?.length ? ` <span class="small">· unlocked item quests: ${r.lootQuests.map(n => qlink(n)).join(', ')}</span>` : ''}</div>` : ''}
+      ${r.turnIns.length || r.storyAfter.length || r.lootQuests?.length ? `<div class="raid-after"><span class="small muted">After the raid:</span> ${storySteps(r.storyAfter)} ${r.turnIns.length ? `<span class="small">hand in ${qNames(r.turnIns, p)}</span>` : ''}${r.lootQuests?.length ? ` <span class="small">· unlocked item quests: ${qNames(r.lootQuests, p)}</span>` : ''}</div>` : ''}
     </li>`;
   }).join('') || '<div class="empty">Nothing to plan – every available quest objective is done, or the next quests need a higher level / trader loyalty.</div>'}</ol>
   ${lootPlanHtml(plan, needs, raidLoot, ld)}
@@ -398,8 +417,19 @@ export function bringHtml(br) {
   if (!br.items.length && !br.wear.length && !br.keys.length) return '';
   return `<div class="raid-bring">${br.items.length ? `<span class="small muted">Bring:</span> ${br.items.map(b => itemChip(b.item, { count: b.count, small: true })).join('')}` : ''}${br.wear.length ? ` <span class="small muted">Wear / use:</span> ${br.wear.map(b => itemChip(b.item, { small: true })).join('')}` : ''}${br.keys.length ? ` <span class="small muted">Keys:</span> ${br.keys.map(b => itemChip(b.item, { small: true })).join('')}${br.keys.some(k => k.alt) ? ' <span class="small muted">(one of them)</span>' : ''}` : ''}</div>`;
 }
-const objLi = (n, o, p) => `<li class="obj"><button class="cb cb-s ${p.obj[n + '|' + o.id] ? 'on' : ''}" data-act="obj" data-q="${attr(n)}" data-o="${o.id}" aria-label="Toggle">${icon('check')}</button><span class="obj-t">${o.html}${o.kind === 'kill' && /\b([5-9]|\d{2,})\b/.test(o.text) ? ' <span class="small muted">(may need more than one raid)</span>' : ''}</span></li>`;
-const questBlock = (n, objs, p, badges = '') => `<div class="raid-q"><div class="raid-qh">${traderImg(D.quests[n].trader, 'mp-tr')} ${qlink(n)} ${notYet(n, p)}${badges}<button class="ibtn" data-act="info" data-q="${attr(n)}" aria-label="Info">${icon('info')}</button></div>
+const objLi = (n, o, p) => { const anyMap = objType(D.quests[n], o) === 'any'; return `<li class="obj"><button class="cb cb-s ${p.obj[n + '|' + o.id] ? 'on' : ''}" data-act="obj" data-q="${attr(n)}" data-o="${o.id}" aria-label="Toggle">${icon('check')}</button><span class="obj-t">${o.html}${anyMap ? ' <span class="badge b-muted" data-tip="Works on any map – planned into this raid">any map</span>' : ''}${o.kind === 'kill' && /\b([5-9]|\d{2,})\b/.test(o.text) ? ' <span class="small muted">(may need more than one raid)</span>' : ''}</span></li>`; };
+// Story + Kappa first; side quests below in their own colour
+const isSide = (n, f) => !f.has(n);
+const sideTip = 'Side quest – not needed for the story or Kappa';
+function qChips(names, p) {
+  const f = focusQuests(p);
+  return [...names.filter(n => f.has(n)), ...names.filter(n => !f.has(n))].map(n => `<span class="chip ${f.has(n) ? '' : 'side'}" ${f.has(n) ? '' : `data-tip="${attr(sideTip + (p.settings.goal?.lightkeeper ? ' or Lightkeeper' : ''))}"`}>${traderImg(D.quests[n].trader, 'chip-img')}${qlink(n)}</span>`).join('');
+}
+function qNames(names, p) {
+  const f = focusQuests(p);
+  return [...names.filter(n => f.has(n)).map(n => qlink(n)), ...names.filter(n => !f.has(n)).map(n => `<span class="side-n">${qlink(n)}</span>`)].join(', ');
+}
+const questBlock = (n, objs, p, badges = '', side = false) => `<div class="raid-q ${side ? 'side' : ''}"><div class="raid-qh">${traderImg(D.quests[n].trader, 'mp-tr')} ${qlink(n)} ${notYet(n, p)}${badges}<button class="ibtn" data-act="info" data-q="${attr(n)}" aria-label="Info">${icon('info')}</button></div>
   <ul class="objs">${objs.map(o => objLi(n, o, p)).join('')}</ul></div>`;
 export function raidBodyHtml(r, p, { anywhere = [] } = {}) {
   const startE = r.entries.filter(e => e.kind === 'start');
@@ -408,8 +438,19 @@ export function raidBodyHtml(r, p, { anywhere = [] } = {}) {
   const byA = {}; for (const e of anywhere) (byA[e.q.name] = byA[e.q.name] || []).push(e.o);
   return `${startE.map(e => { const c = D.chapters[e.c]; const st = chapterStart(c); return `<div class="raid-q story-q"><div class="raid-qh">${chIcon(e.c)} <b>Start storyline: ${esc(e.c)}</b><button class="ibtn" data-act="info-ch" data-c="${attr(e.c)}" aria-label="Guide">${icon('info')}</button></div><div class="small">${st.html}${st.htmlByMap[r.map] && st.htmlByMap[r.map] !== st.html ? `<br>${st.htmlByMap[r.map]}` : ''}</div><button class="btn btn-s ${chapterStarted(c, p) ? 'on' : ''}" data-act="ch-start" data-c="${attr(e.c)}">${chapterStarted(c, p) ? 'Started ✓' : 'I picked it up – mark as started'}</button></div>`; }).join('')}
     ${Object.entries(byC).map(([c, objs]) => `<div class="raid-q story-q"><div class="raid-qh">${chIcon(c)} <b>${esc(c)}</b> <span class="small muted">story chapter</span><button class="ibtn" data-act="info-ch" data-c="${attr(c)}" aria-label="Guide">${icon('info')}</button></div><ul class="objs">${objs.map(o => `<li class="obj"><button class="cb cb-s ${p.chObj[c + '|' + o.id] ? 'on' : ''}" data-act="chobj" data-q="${attr(c)}" data-o="${o.id}" aria-label="Toggle">${icon('check')}</button><span class="obj-t">${o.html}</span></li>`).join('')}</ul></div>`).join('')}
-    ${Object.entries(byQ).map(([n, objs]) => questBlock(n, objs, p, r.turnIns.includes(n) ? '<span class="badge b-av" data-tip="All raid objectives done after this raid – hand it in">finishes</span>' : '')).join('')}
-    ${Object.entries(byA).map(([n, objs]) => questBlock(n, objs, p, '<span class="badge b-muted" data-tip="Can be done on any map">any map</span>')).join('')}`;
+    ${(() => {
+      const f = focusQuests(p);
+      const gates = focusGates(p, f);
+      const fin = (n) => (r.turnIns.includes(n) ? '<span class="badge b-av" data-tip="All raid objectives done after this raid – hand it in">finishes</span>' : '');
+      const anyB = '<span class="badge b-muted" data-tip="Can be done on any map">any map</span>';
+      const help = (n) => (helpsFocus(D.quests[n], gates) ? '<span class="badge b-muted" data-tip="Counts toward the loyalty group a Kappa task is still waiting for">helps Kappa</span>' : '');
+      const q = Object.entries(byQ), a = Object.entries(byA);
+      const sq = q.filter(([n]) => isSide(n, f)), sa = a.filter(([n]) => isSide(n, f));
+      return `${q.filter(([n]) => !isSide(n, f)).map(([n, objs]) => questBlock(n, objs, p, fin(n))).join('')}
+        ${a.filter(([n]) => !isSide(n, f)).map(([n, objs]) => questBlock(n, objs, p, anyB)).join('')}
+        ${sq.length || sa.length ? `<div class="raid-side-h"><span>Side quests</span> <span class="small">not needed for Story / Kappa${p.settings.goal?.lightkeeper ? ' / Lightkeeper' : ''} – do them when they're on the way</span></div>
+          ${sq.map(([n, objs]) => questBlock(n, objs, p, fin(n) + help(n), true)).join('')}${sa.map(([n, objs]) => questBlock(n, objs, p, anyB + help(n), true)).join('')}` : ''}`;
+    })()}`;
 }
 
 // ---------- In-Raid view: everything you can do on one map right now ----------
@@ -421,25 +462,26 @@ export function mapTodo(map, { bosses = null } = {}) {
   const cand = candidates(sp);
   const avail = (e) => e.kind !== 'quest' || (!isDone(e.q.name, p) && questStatus(e.q, p).s === 'available');
   const dedup = (list) => { const seen = new Set(); return (list || []).filter(e => { const k = ekey(e); if (seen.has(k)) return false; seen.add(k); return true; }); };
-  const maps = Object.keys(cand).map(m => ({ map: m, n: dedup(cand[m]).filter(avail).length, story: cand[m].some(e => e.kind !== 'quest') })).filter(x => x.n).sort((a, b) => b.story - a.story || b.n - a.n);
+  const focus = focusQuests(p);
+  const maps = Object.keys(cand).map(m => { const es = dedup(cand[m]).filter(avail); return { map: m, n: es.length, f: es.filter(e => e.kind !== 'quest' || focus.has(e.q.name)).length, story: cand[m].some(e => e.kind !== 'quest') }; }).filter(x => x.n).sort((a, b) => b.story - a.story || b.f - a.f || b.n - a.n);
   const key = Object.keys(cand).find(m => m === map) || Object.keys(cand).find(m => normM(m) === normM(map) || (normM(map) === 'groundzero' && normM(m).startsWith('groundzero')));
   const all = dedup(cand[key]);
   const entries = all.filter(avail);
   const later = all.length - entries.length;
-  const act = (e) => (e.kind !== 'quest' ? 0 : p.active?.[e.q.name] ? 1 : 2);
+  const act = (e) => (e.kind !== 'quest' ? 0 : (focus.has(e.q.name) ? 0 : 2) + (p.active?.[e.q.name] ? 1 : 2));
   entries.sort((a, b) => act(a) - act(b));
   const turnIns = [];
   const byQ = {}; for (const e of entries) if (e.kind === 'quest') (byQ[e.q.name] = byQ[e.q.name] || []).push(e.o.id);
-  for (const [n, ids] of Object.entries(byQ)) { const q = D.quests[n]; if (!q.objectives.some(o => !o.optional && !hasChildren(q.objectives, o) && objType(q, o) === 'raid' && !objDoneIn(sp, n, o.id) && !ids.includes(o.id))) turnIns.push(n); }
+  for (const [n, ids] of Object.entries(byQ)) { const q = D.quests[n]; if (!q.objectives.some(o => !o.optional && !hasReqKids(q.objectives, o) && objType(q, o) === 'raid' && !objDoneIn(sp, n, o.id) && !ids.includes(o.id))) turnIns.push(n); }
   // objectives of open quests that work on any map (eliminate PMCs anywhere, flexible boss kills on this map …)
   const anywhere = [];
   for (const n of IX.order) {
     const q = D.quests[n];
     if (isDone(n, p) || !visible(q, p) || karmaQuest(q) || questStatus(q, p).s !== 'available') continue;
     for (const o of q.objectives) {
-      if (o.optional || p.obj[`${n}|${o.id}`] || hasChildren(q.objectives, o)) continue;
+      if (o.optional || p.obj[`${n}|${o.id}`] || hasReqKids(q.objectives, o)) continue;
       const t = objType(q, o);
-      if (!(t === 'flex' || (t === 'menu' && ['kill', 'extract'].includes(o.kind) && !objMaps(q, o).length))) continue;
+      if (!(t === 'flex' || t === 'any')) continue;
       // "eliminate Reshala" only where Reshala can spawn
       const named = bosses ? bosses.all.filter(b => new RegExp(`\\b${b.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}s?\\b`, 'i').test(o.text)) : [];
       if (named.length ? !named.some(b => bosses.here.has(b)) : t === 'flex' && !(q.maps || []).some(m => normM(m) === normM(map))) continue;
@@ -454,7 +496,7 @@ export function mapTodo(map, { bosses = null } = {}) {
 function notYet(n, p) {
   const st = questStatus(D.quests[n], p);
   if (st.s !== 'locked') return '';
-  const why = st.reasons.map(r => r.k === 'var' ? `after ${varNeed(r.x, p)} more finished ${r.x.trader} LL${r.x.tier} task${varNeed(r.x, p) > 1 ? 's' : ''} (e.g. the hand-ins before this raid)` : r.k === 'level' ? `at PMC level ${r.v}` : r.k === 'll' ? `at ${r.v.trader} LL${r.v.level}` : r.k === 'pre' ? `after ${r.g.map(a => a.q).join(' or ')}` : r.k === 'tour' || r.k === 'start' ? 'after the Tour steps' : r.k === 'map' ? 'when the map is unlocked' : r.k === 'chapter' ? `after the ${r.c.ch} step` : '').filter(Boolean);
+  const why = st.reasons.map(r => r.k === 'var' ? `after ${varNeed(r.x, p)} more finished ${r.x.trader} LL${r.x.tier} task${varNeed(r.x, p) > 1 ? 's' : ''} (e.g. the hand-ins before this raid)` : r.k === 'level' ? `at PMC level ${r.v}` : r.k === 'll' ? `at ${r.v.trader} LL${r.v.level}` : r.k === 'pre' ? `after ${r.g.map(a => a.q).join(' or ')}` : r.k === 'tour' || r.k === 'start' ? 'after the Tour steps' : r.k === 'map' ? 'when the map is unlocked' : r.k === 'chapter' ? `after the ${r.c.ch} step` : r.k === 'rep' ? `at ${r.r.trader} reputation ${r.r.value}` : '').filter(Boolean);
   return `<span class="badge b-lock" data-tip="${attr('Not in your task list yet – unlocks ' + (why.join(', ') || 'during the plan') + '. Hand in the earlier quests first.')}">${icon('lock')}unlocks first</span>`;
 }
 

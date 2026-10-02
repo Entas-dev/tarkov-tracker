@@ -76,6 +76,15 @@ export class Wiki {
     return redirects;
   }
 
+  // {title -> final title} for titles that redirect (normalisation included)
+  async redirects(titles) {
+    titles = [...new Set(titles.map(normTitle).filter(Boolean))];
+    const red = await this._batched(titles, { redirects: '1' }, () => {});
+    const out = {};
+    for (const t of titles) { let f = t, g = 0; while (red[f] && g++ < 5) f = red[f]; if (f !== t) out[t] = f; }
+    return out;
+  }
+
   // Returns {title -> {title, wikitext, missing}} keyed by REQUESTED title (after resolving redirects)
   async wikitext(titles) {
     titles = [...new Set(titles.map(normTitle).filter(Boolean))];

@@ -3,7 +3,7 @@
 // screenshot text recognition), hideout. Only real information counts: the tracker derives "done" from what you
 // say is open (everything before an open quest is finished) – never from estimates.
 import { store } from './store.js';
-import { D, IX, P, visible, isDone, traderLL, llIsManual, chapterClosure, requiredChapters, plausibleOpen, impliedDone, impliedLater, previewActiveApply, applyActiveQuests, isSeasonal, ENDINGS } from './model.js';
+import { D, IX, P, visible, isDone, traderLL, llIsManual, chapterClosure, requiredChapters, plausibleOpen, impliedDone, impliedLater, previewActiveApply, applyActiveQuests, isSeasonal, ENDINGS, hLevel, EDITIONS, editionOf, editionName, editionLevel } from './model.js';
 import { esc, attr, icon, img, traderImg, toast } from './ui.js';
 import { goalToggles, itemFilter, hideoutChecklistHtml } from './tabs-other.js';
 import { perksBodyHtml } from './perks.js';
@@ -18,9 +18,9 @@ let jobSeq = 0;
 // ---------- per-profile draft (choices that only matter inside the assistant) ----------
 const draft = () => (store.ui.wiz || {})[store.active] || {};
 const setDraft = (patch) => store.setUi('wiz', { ...(store.ui.wiz || {}), [store.active]: { ...draft(), ...patch } });
-export const activeOpts = () => ({ noOpen: Object.keys(draft().noOpen || {}), done: (draft().ocrDone || []).filter(n => D.quests[n]) });
+export const activeOpts = () => ({ done: (draft().ocrDone || []).filter(n => D.quests[n]) });
 // what the open-quests step would apply – to tell whether it was applied since the last change
-const inputSig = () => { const o = activeOpts(); const a = Object.keys(P().active || {}).filter(n => P().active[n] && D.quests[n]).sort(); return a.length || o.noOpen.length || o.done.length ? JSON.stringify([a, o.noOpen.sort(), o.done.slice().sort()]) : ''; };
+const inputSig = () => { const o = activeOpts(); const a = Object.keys(P().active || {}).filter(n => P().active[n] && D.quests[n]).sort(); return a.length || o.done.length ? JSON.stringify([a, o.done.slice().sort()]) : ''; };
 const unapplied = () => { const s = inputSig(); return !!s && draft().applied?.sig !== s; };
 
 function pristine(p) {
@@ -48,7 +48,7 @@ export function openSetup(step = 'start') {
   stepId = step;
   if (fresh() == null && !pristine(P())) setDraft({ fresh: false });
   // "nothing open at …" / "finished" marks belong to the list you entered back then – start over after a while
-  if (draft().applied && Date.now() - draft().applied.at > 30 * 60e3) setDraft({ noOpen: {}, ocrDone: [], fromShot: {}, applied: null });
+  if (draft().applied && Date.now() - draft().applied.at > 30 * 60e3) setDraft({ ocrDone: [], fromShot: {}, applied: null });
   renderSetup(true);
 }
 export const setupOpen = () => isOpen;
@@ -97,7 +97,8 @@ const seg = (act, cur, opts, extra = '') => `<div class="seg" role="radiogroup">
 const BODY = {
   start() {
     const p = P();
-    const ed = p.settings.unheard ? 'unheard' : p.settings.eod ? 'eod' : 'std';
+    const ed = editionOf(p);
+    const edH = Object.entries(IX.edHideout || {}).map(([m, e]) => e[ed] ? `${m} ${e[ed]}` : '').filter(Boolean);
     const f = fresh();
     return `
       <h2 class="wiz-h2">Where do you start?</h2>
@@ -106,8 +107,8 @@ const BODY = {
         <button class="wiz-card ${f === false ? 'on' : ''}" data-act="wz-fresh" data-v="0">${icon('list')}<b>Already playing</b><span class="small">Tell the tracker which quests are open in your game (screenshots or a short list per trader) – everything before them is marked done.</span></button>
       </div>
       <h3 class="wiz-h3">Game edition</h3>
-      ${seg('wz-ed', ed, [['std', 'Standard / LB / PfE'], ['eod', 'Edge of Darkness'], ['unheard', 'The Unheard']])}
-      <p class="small muted">Decides which edition-only quests exist for you. The Unheard includes everything from Edge of Darkness.</p>
+      ${seg('wz-ed', ed, EDITIONS)}
+      <p class="small muted">Decides which edition-only quests exist for you and which hideout levels you start with${edH.length ? ` – yours: <b>${esc(edH.join(', '))}</b>, already built without upgrading` : ''}. The Unheard includes everything from Edge of Darkness.</p>
       <div class="wiz-row">
         <div><h3 class="wiz-h3">Faction</h3>${seg('wz-fac', p.settings.faction, [['USEC', 'USEC'], ['BEAR', 'BEAR']])}</div>
         <div><h3 class="wiz-h3">PMC level</h3><input type="number" class="wiz-lvl" min="1" max="79" value="${p.settings.level}" data-set="level" aria-label="PMC level"></div>
@@ -159,7 +160,10 @@ const BODY = {
         const cur = traderLL(t, p);
         return `<div class="wiz-ll">${traderImg(t, 'wiz-tr')}<b>${esc(t)}</b><span class="as-ll">${Array.from({ length: max }, (_, k) => k + 1).map(l => `<button class="as-llb ${man && cur === l ? 'on' : ''}" data-act="setll" data-t="${attr(t)}" data-l="${l}" aria-label="${attr(t)} loyalty level ${l}">${l}</button>`).join('')}
           ${man ? `<button class="linkbtn" data-act="setll" data-t="${attr(t)}" data-l="">auto</button>` : `<span class="small muted" data-tip="Estimated from your PMC level (level ${p.settings.level})">auto ${cur}</span>`}</span></div>`;
-      }).join('')}</div>`;
+      }).join('')}</div>
+      <h3 class="wiz-h3">Fence reputation (Scav karma)</h3>
+      <div class="wiz-ll wiz-rep">${traderImg('Fence', 'wiz-tr')}<b>Fence</b><input type="number" step="0.01" min="-7" max="6" class="wiz-lvl" data-rep="Fence" value="${attr(p.settings.rep?.Fence ?? '')}" placeholder="unknown" aria-label="Fence reputation">
+        <span class="small muted">Some tasks need it (${esc(Object.values(D.quests).filter(q => q.rep?.some(r => r.trader === 'Fence' && r.cmp.startsWith('>')) && visible(q, p)).map(q => `${q.name} ${q.rep.find(r => r.trader === 'Fence').value}`).join(', '))}). Left empty, they count as "can't tell".</span></div>`;
   },
 
   quests() { return questsStep(); },
@@ -167,7 +171,7 @@ const BODY = {
   hideout() {
     return `
       <h2 class="wiz-h2">Hideout</h2>
-      <p class="small">Tick every level you have built – required lower levels and modules are ticked automatically. Built levels drop out of Needed Items.</p>
+      <p class="small">Tick every level you have built – required lower levels and modules are ticked automatically. Built levels drop out of Needed Items.${Object.keys(IX.edHideout || {}).some(m => editionLevel(m, P())) ? ` Levels marked <b>${esc(editionName(P()))}</b> come with your edition – nothing they would require is ticked.` : ''}</p>
       ${hideoutChecklistHtml(P())}`;
   },
 
@@ -176,14 +180,14 @@ const BODY = {
     const nDone = Object.keys(p.quests).filter(n => p.quests[n] && D.quests[n]).length;
     const nOpen = Object.keys(p.active || {}).filter(n => p.active[n] && D.quests[n] && !isDone(n, p)).length;
     const nCh = Object.keys(p.ch).filter(c => p.ch[c] && D.chapters[c]).length;
-    const nH = D.hideout.modules.reduce((s, m) => s + Math.min(p.hideout[m.name] || 0, m.levels.length), 0);
+    const nH = D.hideout.modules.reduce((s, m) => s + Math.min(hLevel(m.name, p), m.levels.length), 0);
     const g = itemFilter();
     const goals = [['story', 'Story'], ['kappa', 'Kappa'], ['lightkeeper', 'Lightkeeper'], ['quests', 'All quests'], ['hideout', 'Hideout']].filter(([k]) => g[k]).map(([, l]) => l);
     return `
       <h2 class="wiz-h2">All set</h2>
       ${unapplied() ? `<div class="notice">${icon('info')}<div>Your open quests from step <b>Open quests</b> are <b>not applied yet</b> – nothing before them is marked done. <button class="btn btn-s btn-p" data-act="wz-apply" data-mode="strict">${icon('check')} Apply – full task list</button> <button class="linkbtn" data-act="wz-go" data-s="quests">Back to the preview</button></div></div>` : ''}
       <div class="wiz-sum">
-        <div><span class="muted small">Edition</span><b>${p.settings.unheard ? 'The Unheard' : p.settings.eod ? 'Edge of Darkness' : 'Standard'}</b></div>
+        <div><span class="muted small">Edition</span><b>${esc(editionName(p))}</b></div>
         <div><span class="muted small">Faction · level</span><b>${esc(p.settings.faction)} · ${p.settings.level}</b></div>
         <div><span class="muted small">Goal</span><b>${esc(goals.join(' + ') || '–')}</b></div>
         <div><span class="muted small">Ending</span><b>${esc(p.settings.ending)}</b></div>
@@ -209,7 +213,6 @@ function questsStep() {
   const act = Object.keys(p.active || {}).filter(n => p.active[n] && D.quests[n] && visible(D.quests[n], p)); // applying reopens ticked quests that were marked done
   const before = impliedDone(act, p);
   const later = impliedLater(act, p);
-  const noOpen = dr.noOpen || {};
   const fromShot = dr.fromShot || {};
   const q = (dr.q || '').toLowerCase().trim();
   const showAll = !!dr.showAll;
@@ -244,15 +247,13 @@ function questsStep() {
   if (q) {
     const hits = IX.order.filter(n => visible(D.quests[n], p) && n.toLowerCase().includes(q)).slice(0, 60);
     listHtml = hits.map(row).join('') || '<div class="empty small">No quest matches.</div>';
-  } else if (noOpen[sel]) {
-    listHtml = `<div class="wq-none small">${icon('check')} You said nothing is open at ${esc(sel)} – every task the tracker sees as unlocked there counts as finished. <button class="linkbtn" data-act="wz-noopen" data-t="${attr(sel)}">Undo</button></div>`;
   } else {
     const names = showAll ? (IX.byTrader[sel] || []).filter(n => visible(D.quests[n], p) && !isDone(n, p) || act.includes(n)) : T.cand;
     listHtml = names.map(row).join('') || '<div class="empty small">Nothing that can be open here.</div>';
   }
   return `
     <h2 class="wiz-h2">Your open quests</h2>
-    <p class="small">In the game open every trader's <b>Tasks</b> (Show completed and Show locked <b>off</b>) – that list is what the tracker needs. Everything before an open quest is finished; anything unlocked that is <b>not</b> in your list is finished too. You see exactly what will be marked before you apply.</p>
+    <p class="small">In the game open every trader's <b>Tasks</b> (Show completed and Show locked <b>off</b>) – that list is what the tracker needs, for <b>every</b> trader (one without ticks has nothing open). Everything before an open quest is finished; anything unlocked that is <b>not</b> in your list is finished too – or, where the list can't tell, you decide. Afterwards only your open quests count as available. You see exactly what will be marked before you apply.</p>
     <div class="wq">
         <section class="wq-sec wq-a">
           <h3 class="wiz-h3"><span class="wq-num">1</span>Screenshots <span class="small muted">fastest</span></h3>
@@ -261,16 +262,16 @@ function questsStep() {
           <input type="file" id="wz-file" accept="image/*" multiple hidden>
           ${jobs.length ? `<div class="wq-jobs">${jobs.slice().reverse().map(jobHtml).join('')}</div>` : ''}
         </section>
-        <section class="wq-sec wq-c">
+        <section class="wq-sec wq-ap">
           <h3 class="wiz-h3"><span class="wq-num">3</span>Apply</h3>
           ${applyHtml(act)}
         </section>
       <section class="wq-sec wq-r">
         <h3 class="wiz-h3"><span class="wq-num">2</span>Check per trader <span class="small muted">${act.length} open ticked</span></h3>
-        <div class="wq-trs">${traders.map(t => { const r = info[t]; return `<button class="wq-tr ${t === sel && !q ? 'on' : ''} ${noOpen[t] ? 'none' : ''}" data-act="wz-tr" data-t="${attr(t)}" data-tip="${attr(`${t}: ${r.open.length} open ticked · ${r.cand.length - r.open.length} more can be open`)}">${traderImg(t, 'wq-tri')}<span>${esc(t)}</span>${r.open.length ? `<span class="wq-c">${r.open.length}</span>` : noOpen[t] ? `<span class="wq-c none">${icon('check')}</span>` : ''}</button>`; }).join('')}</div>
+        <div class="wq-trs">${traders.map(t => { const r = info[t]; return `<button class="wq-tr ${t === sel && !q ? 'on' : ''} ${r.open.length ? '' : 'none'}" data-act="wz-tr" data-t="${attr(t)}" data-tip="${attr(r.open.length ? `${t}: ${r.open.length} open ticked · ${r.cand.length - r.open.length} more can be open` : `${t}: nothing ticked – counts as "nothing open" when you apply your full list`)}">${traderImg(t, 'wq-tri')}<span>${esc(t)}</span><span class="wq-c ${r.open.length ? '' : 'none'}">${r.open.length}</span></button>`; }).join('')}</div>
         <label class="search wq-search">${icon('search')}<input type="search" data-wzq placeholder="Search any quest" value="${attr(dr.q || '')}" aria-label="Search quests"></label>
         ${q ? '' : `<div class="wq-th">${traderImg(sel, 'mp-tr')}<b>${esc(sel)}</b><span class="small muted">LL ${traderLL(sel, p)}${llIsManual(sel, p) ? '' : ' (auto)'}</span>
-          <button class="btn btn-s ${noOpen[sel] ? 'btn-p' : ''}" data-act="wz-noopen" data-t="${attr(sel)}" data-tip="Your in-game list for this trader is empty: all unlocked tasks are done">Nothing open here</button></div>
+          ${T.open.length ? '' : '<span class="small wq-zero">nothing ticked = nothing open here</span>'}</div>
           <p class="small muted wq-sub">Tick what you see in the game. Hidden: ${T.done} done${T.before ? ` · ${T.before} finished before your open quests` : ''}${T.later ? ` · ${T.later} only after them` : ''}${T.gated ? ` · ${T.gated} need a higher level / LL` : ''}. <button class="linkbtn" data-act="wz-all">${showAll ? 'Show only possible ones' : 'Show all'}</button></p>`}
         <div class="wq-list" data-keep="wq-list">${listHtml}</div>
       </section>
@@ -293,7 +294,7 @@ function jobHtml(j) {
 function applyHtml(act) {
   const dr = draft();
   const opts = activeOpts();
-  if (!act.length && !opts.noOpen.length && !opts.done.length) return '<p class="small muted">Add screenshots or tick your open quests first.</p>';
+  if (!act.length && !opts.done.length) return '<p class="small muted">Add screenshots or tick your open quests first.</p>';
   const t0 = performance.now();
   const pv = previewActiveApply('strict', opts);
   const ms = Math.round(performance.now() - t0);
@@ -304,7 +305,8 @@ function applyHtml(act) {
   const keepOpen = (n) => `<button class="linkbtn" data-act="wz-keep" data-q="${attr(n)}" data-tip="It is in my in-game list – keep it open">open</button>`;
   return `
     <div class="wq-pv">
-      <div><b>${act.length}</b> open quest${act.length !== 1 ? 's' : ''} ticked${opts.noOpen.length ? ` · nothing open at ${esc(opts.noOpen.join(', '))}` : ''}${opts.done.length ? ` · ${opts.done.length} marked as finished` : ''}</div>
+      <div><b>${act.length}</b> open quest${act.length !== 1 ? 's' : ''} ticked${opts.done.length ? ` · ${opts.done.length} marked as finished` : ''}</div>
+      ${pv.noTicks.length ? `<div class="small">Nothing ticked at <b>${esc(pv.noTicks.join(', '))}</b> – counted as <b>nothing open</b> there.</div>` : ''}
       <div><b>${pv.doneAfter.length}</b> quests will be marked done:</div>
       <ul class="small wq-pvl">
         <li><b>${pv.closure.length + opts.done.length}</b> come before your open / completed quests</li>
@@ -313,9 +315,11 @@ function applyHtml(act) {
         ${pv.level ? `<li>PMC level raised to <b>${pv.level}</b></li>` : ''}${pv.ll.length ? `<li>${esc(pv.ll.join(', '))} set</li>` : ''}
       </ul>
       ${pv.strictList.length ? `<details class="wq-strict" ${pv.strictList.length <= 25 ? 'open' : ''}><summary class="small">Unlocked but not in your list → finished (${pv.strictList.length})</summary>${byT(pv.strictList).map(([t, ns]) => `<div class="wq-sg">${traderImg(t, 'mp-tr')} <b class="small">${esc(t)}</b><div class="wq-sl">${ns.map(n => `<span class="wq-s ${llRisk.includes(n) ? 'risk' : ''}">${esc(n)} ${keepOpen(n)}</span>`).join('')}</div></div>`).join('')}</details>` : ''}
-      ${pv.capped.length || pv.choice.length ? `<details class="wq-strict" open><summary class="small">Can't tell from your list (${pv.capped.length + pv.choice.length}) – tick the ones you finished</summary>
+      ${pv.capped.length || pv.choice.length || pv.unsure.length ? `<details class="wq-strict" open><summary class="small">Can't tell from your list (${pv.capped.length + pv.choice.length + pv.unsure.length}) – tick the ones you finished</summary>
+        <p class="small muted">They are not in your list, so they are not open – but finished or still locked? The rest stays out of Speedrun and In-Raid until you tick it.</p>
         ${pv.choice.length ? `<p class="small muted">Either-or quests – you did one of them (or none yet):</p><div class="wq-sl">${pv.choice.map(n => `<button class="wq-s wq-tg" data-act="wz-done" data-q="${attr(n)}" data-tip="${attr(`${D.quests[n].trader} · instead of ${D.quests[n].alts.join(', ')}`)}">${esc(n)}</button>`).join('')}</div>` : ''}
-        ${pv.capped.length ? `<p class="small muted">Higher loyalty group – unlocks after enough finished tasks at that LL; not in your list means finished <b>or</b> still locked:</p>${byT(pv.capped).map(([t, ns]) => `<div class="wq-sg">${traderImg(t, 'mp-tr')} <b class="small">${esc(t)}</b><div class="wq-sl">${ns.map(n => `<button class="wq-s wq-tg" data-act="wz-done" data-q="${attr(n)}">${esc(n)}</button>`).join('')}</div></div>`).join('')}` : ''}</details>` : ''}
+        ${pv.capped.length ? `<p class="small muted">Higher loyalty group – unlocks after enough finished tasks at that LL:</p>${byT(pv.capped).map(([t, ns]) => `<div class="wq-sg">${traderImg(t, 'mp-tr')} <b class="small">${esc(t)}</b><div class="wq-sl">${ns.map(n => `<button class="wq-s wq-tg" data-act="wz-done" data-q="${attr(n)}">${esc(n)}</button>`).join('')}</div></div>`).join('')}` : ''}
+        ${pv.unsure.length ? `<p class="small muted">Other reasons (hover for details):</p><div class="wq-sl">${pv.unsure.map(u => `<button class="wq-s wq-tg" data-act="wz-done" data-q="${attr(u.n)}" data-tip="${attr(`${D.quests[u.n].trader} · ${u.why}`)}">${esc(u.n)}</button>`).join('')}</div>` : ''}</details>` : ''}
       ${opts.done.length ? `<details class="wq-strict"><summary class="small">Marked as finished by you / screenshots (${opts.done.length})</summary><div class="wq-sl">${opts.done.map(n => `<button class="wq-s wq-tg on" data-act="wz-done" data-q="${attr(n)}" data-tip="Click to remove">${icon('check')} ${esc(n)}</button>`).join('')}</div></details>` : ''}
       ${llRisk.length ? `<div class="notice wq-warn">${icon('info')}<div class="small"><b>${llRisk.length}</b> of them need a loyalty level the tracker only <b>estimated</b> (${esc([...new Set(llRisk.map(n => D.quests[n].ll.trader))].join(', '))}). Set your real LL in the <button class="linkbtn" data-act="wz-go" data-s="ll">Loyalty</button> step, otherwise locked quests may be marked done.</div></div>` : ''}
       <div class="wq-btns">
@@ -385,8 +389,8 @@ function applyShot(j, res) {
   const done = found.filter(f => f.status === 'done').map(f => f.name);
   const qs = [...open, ...done].map(n => D.quests[n]);
   const set = {};
-  if (qs.some(q => q.edition === 'Unheard') && !p0.settings.unheard) { set.unheard = true; set.eod = true; det.push('The Unheard edition'); }
-  else if (qs.some(q => q.edition === 'EOD') && !p0.settings.eod) { set.eod = true; det.push('Edge of Darkness'); }
+  if (qs.some(q => q.edition === 'Unheard') && !p0.settings.unheard) { set.unheard = true; set.eod = true; set.edition = 'unheard'; det.push('The Unheard edition'); }
+  else if (qs.some(q => q.edition === 'EOD') && !p0.settings.eod) { set.eod = true; set.edition = 'eod'; det.push('Edge of Darkness'); }
   const fac = qs.find(q => q.faction)?.faction;
   if (fac && fac !== p0.settings.faction) { set.faction = fac; det.push(fac); }
   j.detected = det;
@@ -411,7 +415,7 @@ function onClick(e) {
     case 'wz-close': closeSetup(false); break;
     case 'wz-finish': { closeSetup(true); if (b.dataset.go) location.hash = '#/' + b.dataset.go; toast('Setup saved'); break; }
     case 'wz-fresh': { const v = b.dataset.v === '1'; setDraft({ fresh: v }); if (v) stepId = 'start'; renderSetup(); break; }
-    case 'wz-ed': { const v = b.dataset.v; store.update(p => { p.settings.eod = v !== 'std'; p.settings.unheard = v === 'unheard'; }, 'settings'); break; }
+    case 'wz-ed': { const v = b.dataset.v; store.update(p => { p.settings.edition = v; p.settings.eod = v === 'eod' || v === 'unheard'; p.settings.unheard = v === 'unheard'; }, 'settings'); break; }
     case 'wz-fac': store.update(p => { p.settings.faction = b.dataset.v; }, 'settings'); break;
     case 'wz-ch': {
       const c = b.dataset.c, v = +b.dataset.v;
@@ -428,7 +432,6 @@ function onClick(e) {
     }
     case 'wz-tr': setDraft({ trader: b.dataset.t, q: '' }); renderSetup(); document.querySelector('.wq-list')?.scrollTo(0, 0); break;
     case 'wz-all': setDraft({ showAll: !draft().showAll }); renderSetup(); break;
-    case 'wz-noopen': { const t = b.dataset.t; const no = { ...(draft().noOpen || {}) }; if (no[t]) delete no[t]; else no[t] = 1; setDraft({ noOpen: no }); renderSetup(); break; }
     case 'wz-done': { const n = b.dataset.q; const d = new Set(draft().ocrDone || []); if (d.has(n)) d.delete(n); else d.add(n); setDraft({ ocrDone: [...d] }); renderSetup(); break; }
     case 'wz-keep': store.update(p => { p.active = p.active || {}; p.active[b.dataset.q] = 1; }, 'progress', `${b.dataset.q} is open`); break;
     case 'wz-pick': document.getElementById('wz-file')?.click(); break;
@@ -454,6 +457,10 @@ function onInput(e) {
 }
 function onChange(e) {
   if (e.target.id === 'wz-file') { addFiles(e.target.files); e.target.value = ''; }
+  if (e.target.dataset?.rep) {
+    const t = e.target.dataset.rep, raw = e.target.value.trim(), v = Math.max(-7, Math.min(6, parseFloat(raw.replace(',', '.'))));
+    store.update(p => { p.settings.rep = { ...(p.settings.rep || {}) }; if (raw === '' || isNaN(v)) delete p.settings.rep[t]; else p.settings.rep[t] = Math.round(v * 100) / 100; }, 'progress', `${t} reputation ${raw === '' ? 'unknown' : v}`);
+  }
 }
 // a pasted screenshot anywhere on the site goes to the open-quests step
 function onPaste(e) {

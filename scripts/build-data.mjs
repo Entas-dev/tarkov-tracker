@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import { buildDataset } from '../builder/build.js';
 import { Wiki } from '../builder/wiki.js';
-import { fetchTarkovJson, transformMapData, transformGameReqs } from '../builder/mapdata.js';
+import { fetchTarkovJson, transformMapData, transformGameReqs, gameTitle } from '../builder/mapdata.js';
 import { fetchWikiContainers, transformLoot } from '../builder/loot.js';
 
 const out = new URL('../data/', import.meta.url);
@@ -29,7 +29,12 @@ for (const gm of ['regular', 'pve']) {
     fs.writeFileSync(new URL(`mapdata-${gm}.json`, out), JSON.stringify(md));
     console.log(`mapdata-${gm}.json: ${md.tasks.length} tasks with positions, ${md.maps.length} maps, ${kb(`mapdata-${gm}.json`)}`);
     if (gm === 'regular') {
-      const gr = transformGameReqs({ ...raw, wikiQuests: ds.quests, log: console.log });
+      // game titles the wiki has renamed: follow the wiki redirects
+      const unknown = [...new Set(Object.values(raw.tasks.data.tasks || {}).map(t => gameTitle(t, raw.tasksEn)).filter(t => t && !ds.quests[t]))];
+      const alias = {};
+      try { for (const [from, to] of Object.entries(await wiki.redirects(unknown))) { const t = to.replace(/#.*/, ''); if (ds.quests[t]) alias[from] = t; } } catch (e) { console.warn('wiki redirects unavailable: ' + e.message); }
+      console.log(`game titles renamed on the wiki: ${Object.entries(alias).map(([a, b]) => `${a} → ${b}`).join(', ') || 'none'}`);
+      const gr = transformGameReqs({ ...raw, wikiQuests: ds.quests, alias, log: console.log });
       fs.writeFileSync(new URL('prereq-game.json', out), JSON.stringify(gr));
       console.log(`prereq-game.json: ${Object.keys(gr.quests).length} quests, ${Object.keys(gr.vars).length} loyalty-group counters, ${Object.values(gr.quests).filter(q => q.vars).length} quests gated by them`);
     }

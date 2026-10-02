@@ -23,16 +23,25 @@ const wikiTitle = (link) => { try { return decodeURIComponent(String(link || '')
 // Since patch 1.1 (Aug 2026) most side tasks are unlocked in small groups per trader loyalty level: the game
 // gates them with a hidden per-trader-LL counter ("globalVariable >= N") instead of a PMC level or a previous
 // quest – the wiki pages still show the old requirements. v2 of this file exports those counters too.
-export function transformGameReqs({ tasks, tasksEn, tradersEn = null, wikiQuests = null, log = () => {} }) {
+// alias: game title -> wiki page title (the game files link renamed pages, e.g. "Getting Acquainted" is now
+// "To the Light - Getting Acquainted"; "Immunity" links the skill page instead of "Immunity (quest)")
+export const gameTitle = (t, tasksEn) => wikiTitle(t.wikiLink) || (tasksEn?.data?.[t.name] ?? t.name);
+export function transformGameReqs({ tasks, tasksEn, tradersEn = null, wikiQuests = null, alias = {}, log = () => {} }) {
   const tr = (k) => (k != null && tasksEn?.data?.[k] ? tasksEn.data[k] : k);
   const trader = (id) => tradersEn?.data?.[`${id} Nickname`] || id;
   const all = Object.values(tasks.data.tasks || {});
   const byId = Object.fromEntries(all.map(t => [t.id, t]));
+  const titleOf = (t) => { const g = gameTitle(t, tasksEn); return alias[g] || (wikiQuests && !wikiQuests[g] && wikiQuests[g + ' (quest)'] ? g + ' (quest)' : g); };
+  const count = {};
+  for (const t of all) count[titleOf(t)] = (count[titleOf(t)] || 0) + 1;
+  const reqOf = (t) => (t.taskRequirements || []).map(r => { const p = byId[r.task]; return p ? { q: titleOf(p), st: r.status || [] } : null; }).filter(Boolean);
   const quests = {};
   const vmem = {}; // variable id -> {traders:Set, members:[[title, min]]}
   for (const t of all) {
-    const title = wikiTitle(t.wikiLink) || tr(t.name);
-    const req = (t.taskRequirements || []).map(r => { const p = byId[r.task]; return p ? { q: wikiTitle(p.wikiLink) || tr(p.name), st: r.status || [] } : null; }).filter(Boolean);
+    const title = titleOf(t);
+    // several game tasks share one title (the three "Make Amends" hand-ins): a requirement on such a task also
+    // carries that task's own requirements ("via"), so a link that would loop can point one step earlier
+    const req = (t.taskRequirements || []).map(r => { const p = byId[r.task]; if (!p) return null; const q = titleOf(p); const o = { q, st: r.status || [] }; if (count[q] > 1) o.via = reqOf(p).map(x => x.q); return o; }).filter(Boolean);
     const vars = [];
     for (const o of t.otherRequirements || []) {
       if (o.type !== 'globalVariable' || !o.variableId) continue;
@@ -42,10 +51,23 @@ export function transformGameReqs({ tasks, tasksEn, tradersEn = null, wikiQuests
       v.traders.add(trader(t.trader)); v.members.push([title, min]);
     }
     const ll = (t.traderRequirements || []).filter(r => r.requirementType === 'level').map(r => [trader(r.trader), r.value]);
-    quests[title] = { req, lvl: t.minPlayerLevel || 0, kappa: !!t.kappaRequired, lk: !!t.lightkeeperRequired, trader: trader(t.trader) };
-    if (vars.length) quests[title].vars = vars;
-    if (ll.length) quests[title].ll = ll;
-    if ((t.otherRequirements || []).some(o => o.type === 'dialogue')) quests[title].dialogue = true;
+    // reputation: Fence (Scav karma) ≥ n, or "≤ n" for tasks that only appear after you lost standing (Make Amends, Compensation for Damage)
+    const rep = (t.traderRequirements || []).filter(r => r.requirementType === 'reputation').map(r => [trader(r.trader), r.compareMethod, r.value]);
+    const e = { req, lvl: t.minPlayerLevel || 0, kappa: !!t.kappaRequired, lk: !!t.lightkeeperRequired, trader: trader(t.trader) };
+    if (vars.length) e.vars = vars;
+    if (ll.length) e.ll = ll;
+    if (rep.length) e.rep = rep;
+    if ((t.otherRequirements || []).some(o => o.type === 'dialogue')) e.dialogue = true;
+    if (t.factionName && t.factionName !== 'Any') e.faction = t.factionName;
+    const prev = quests[title];
+    if (prev) { // same title again: keep every variant's requirements (any of them unlocks the wiki's one page)
+      prev.dup = (prev.dup || 1) + 1;
+      prev.alts = prev.alts || [prev.req];
+      prev.alts.push(req);
+      if (prev.faction && prev.faction !== e.faction) delete prev.faction; // USEC / BEAR variants of one task
+      continue;
+    }
+    quests[title] = e;
   }
   // which trader loyalty level does each counter belong to? The counters of a trader were created in LL order
   // (their ids ascend); where the wiki still names a loyalty level for most members, that wins.

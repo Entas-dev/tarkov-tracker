@@ -1,5 +1,6 @@
 // App bootstrap, header, routing, global actions
 import { store, PROFILES } from './store.js';
+import { editionLevel, editionName, EDITIONS, editionOf } from './model.js';
 import { D, IX, setDataset, P, visible, isDone, completeQuest, autoChecked, setItemHave, prerequisiteClosure, tourStepsFor, applyActiveQuests, doneDependents, uncompleteQuests, questObjProgress, objKey, chapterClosure, chDone, chapterProgress, hLevel, setModuleLevel, hideoutDependents, objVisibleForEnding, objApplies, condStatus, questStatus, staleAutoTicks } from './model.js';
 import { esc, attr, icon, img, initTooltips, hideTip, confirmDialog, toast, $, $$ } from './ui.js';
 import { expanded, openQuestInfo, openChapterInfo, openItemInfo, openWikiPage, openModuleInfo, closeDrawer, openPanel } from './components.js';
@@ -247,7 +248,9 @@ function toggleChObj(cname, oid) {
 
 async function setHideout(mod, level, exact = false) {
   const cur = hLevel(mod);
+  const ed = editionLevel(mod);
   if (!exact && level === cur && level > 0) level = level - 1; // clicking the current top pip un-builds it
+  if (level < ed) { toast(`${esc(mod)} level ${ed} comes with your ${esc(editionName())} edition`); level = ed; }
   if (level === cur) return;
   store.label(`${mod} → level ${level}`);
   if (level > cur) { setModuleLevel(mod, level); toast(`${esc(mod)} → level ${level}`); return; }
@@ -267,8 +270,7 @@ async function settingsDialog() {
     title: 'Settings',
     bodyHtml: `
       <div class="set-grid">
-        <label class="tog"><input type="checkbox" id="s-eod" ${p.settings.eod ? 'checked' : ''}> I own <b>Edge of Darkness</b> (EOD-only quests)</label>
-        <label class="tog"><input type="checkbox" id="s-unh" ${p.settings.unheard ? 'checked' : ''}> I own <b>The Unheard</b> edition</label>
+        <label class="tog">Game edition <select id="s-ed">${EDITIONS.map(([k, l]) => `<option value="${k}" ${editionOf(p) === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
         <label class="tog"><input type="checkbox" id="s-series" ${p.settings.seriesLogic !== false ? 'checked' : ''}> When checking a quest, also check earlier parts of the same series (e.g. all lower-level <b>Gunsmith</b> quests)</label>
         <p class="small muted">Settings apply to the <b>${esc(store.profile.long)}</b> profile.</p>
         <div class="set-row"><button class="btn" data-x="export">${icon('download')} Export progress</button><button class="btn" data-x="import">${icon('upload')} Import progress</button><input type="file" id="s-file" accept="application/json" hidden></div>
@@ -295,7 +297,8 @@ function onSettingsClick(e) {
   if (x === 'reset') { if (confirm(`Reset all progress of the ${store.profile.long} profile?`)) { store.resetProfile(); document.querySelector('.modal-wrap')?.remove(); } }
 }
 document.addEventListener('change', (e) => {
-  if (e.target.id === 's-eod' || e.target.id === 's-unh' || e.target.id === 's-series') store.update(p => { p.settings.eod = document.getElementById('s-eod').checked; p.settings.unheard = document.getElementById('s-unh').checked; p.settings.seriesLogic = document.getElementById('s-series').checked; });
+  if (e.target.id === 's-ed') { const v = e.target.value; store.update(p => { p.settings.edition = v; p.settings.eod = v === 'eod' || v === 'unheard'; p.settings.unheard = v === 'unheard'; }, 'settings'); }
+  if (e.target.id === 's-series') store.update(p => { p.settings.seriesLogic = e.target.checked; });
 });
 
 async function refreshData(manual = false) {

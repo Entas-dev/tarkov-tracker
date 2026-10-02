@@ -4,7 +4,7 @@
   --text: #cfcdc3; --muted: #8b8980; --head: #efeee8;
   --accent: #bfae7c; --accent2: #8f8260; --accent-ink: #111111;
   --ok: #86a95f; --ok-bg: rgba(134,169,95,.14); --warn: #d2a543; --bad: #c4553f; --bad-bg: rgba(196,85,63,.14);
-  --kappa: #b58ad6; --event: #e07b39; --season: #4fa3a5; --lk: #6fa8dc;
+  --kappa: #b58ad6; --event: #e07b39; --season: #4fa3a5; --lk: #6fa8dc; --side: #7d93ab; --side-ink: #a3afbb;
   /* in-game task list */
   --row: #43341f; --row-h: #51402a; --row-ink: #ecebe6; --row-done: #26321f; --row-lock: #1b1c1e; --row-lock-ink: #86857f;
   --sel-bg: #e4e3de; --sel-ink: #0d0d0d; --gh-bg: #0d0d0e; --gh-ink: #f1f0ec; --gh-line: #6a6b6c;
@@ -20,7 +20,7 @@
     --text: #25241f; --muted: #6a675d; --head: #16150f;
     --accent: #7d6a33; --accent2: #9b8750; --accent-ink: #fbf8ef;
     --ok: #4d7a2a; --ok-bg: rgba(77,122,42,.12); --warn: #9a6f0a; --bad: #a83a25; --bad-bg: rgba(168,58,37,.1);
-    --kappa: #7a4ea3; --event: #b5561a; --season: #2c7c7e; --lk: #336f9e;
+    --kappa: #7a4ea3; --event: #b5561a; --season: #2c7c7e; --lk: #336f9e; --side: #557392; --side-ink: #556170;
     --row: #d6c5a4; --row-h: #cdb994; --row-ink: #1e1b14; --row-done: #c8d7ba; --row-lock: #dddbd4; --row-lock-ink: #7b786e;
     --sel-bg: #1d1e20; --sel-ink: #f3f2ee; --gh-bg: #232426; --gh-ink: #f1f0ec; --gh-line: #6a6b6c;
     --bar: #d0cec6; --bar-ink: #1b1a16; --box: #e4e2db; --box-line: #a9a69c;
@@ -33,7 +33,7 @@
   --text: #25241f; --muted: #6a675d; --head: #16150f;
   --accent: #7d6a33; --accent2: #9b8750; --accent-ink: #fbf8ef;
   --ok: #4d7a2a; --ok-bg: rgba(77,122,42,.12); --warn: #9a6f0a; --bad: #a83a25; --bad-bg: rgba(168,58,37,.1);
-  --kappa: #7a4ea3; --event: #b5561a; --season: #2c7c7e; --lk: #336f9e;
+  --kappa: #7a4ea3; --event: #b5561a; --season: #2c7c7e; --lk: #336f9e; --side: #557392; --side-ink: #556170;
   --row: #d6c5a4; --row-h: #cdb994; --row-ink: #1e1b14; --row-done: #c8d7ba; --row-lock: #dddbd4; --row-lock-ink: #7b786e;
   --sel-bg: #1d1e20; --sel-ink: #f3f2ee; --gh-bg: #232426; --gh-ink: #f1f0ec; --gh-line: #6a6b6c;
   --bar: #d0cec6; --bar-ink: #1b1a16; --box: #e4e2db; --box-line: #a9a69c;
@@ -923,7 +923,7 @@ body.wiz-on { overflow: hidden; }
 kbd { font: 600 12px var(--font); padding: 0 4px; border: 1px solid var(--line2); border-bottom-width: 2px; background: var(--bg2); }
 /* open quests step */
 .wq { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); grid-template-areas: "a r" "c r"; grid-template-rows: auto 1fr; gap: 4px 16px; align-items: start; }
-.wq-a { grid-area: a; } .wq-c { grid-area: c; } .wq-r { grid-area: r; }
+.wq-a { grid-area: a; } .wq-ap { grid-area: c; } .wq-r { grid-area: r; }
 .wq-sec { min-width: 0; }
 .wq-num { display: inline-grid; place-items: center; width: 22px; height: 22px; background: var(--sel-bg); color: var(--sel-ink); font-size: 14px; }
 .wq-drop { display: flex; align-items: center; gap: 12px; padding: 18px; border: 2px dashed var(--line2); background: var(--bg2); cursor: pointer; color: var(--text); }
@@ -990,3 +990,18 @@ body.wiz-on .mappanel, body.wiz-on .mp-box { visibility: hidden; }
 .wq-tg:hover { border-color: var(--ok); }
 .wq-tg.on { border-color: var(--ok); background: var(--ok-bg); }
 .wq-tg .ic { width: 11px; height: 11px; color: var(--ok); }
+.hchk-b.ed { display: inline-grid; place-items: center; cursor: default; background: color-mix(in srgb, var(--accent) 22%, var(--panel)); border-color: var(--accent); color: var(--head); }
+.hchk-b.ed .ic { width: 13px; height: 13px; }
+.wq-zero { margin-left: auto; color: color-mix(in srgb, var(--gh-ink) 70%, transparent); }
+.wq-c.none { background: var(--panel2); color: var(--muted); }
+
+/* Speedrun / In-Raid: side quests (not needed for Story / Kappa) – own colour, below */
+.raid-side-h { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-top: 4px; padding-top: 6px; border-top: 1px dashed color-mix(in srgb, var(--side) 60%, var(--line)); color: var(--side); }
+.raid-side-h > span:first-child { font: 700 14px var(--font-h); text-transform: uppercase; letter-spacing: .06em; }
+.raid-q.side { background: color-mix(in srgb, var(--side) 9%, var(--bg2)); border-color: color-mix(in srgb, var(--side) 40%, var(--line)); border-style: dashed; }
+.raid-q.side, .raid-q.side .ql, .raid-q.side .obj-t { color: var(--side-ink); }
+.raid-q.side .raid-qh { font-weight: 500; }
+.chip.side { border-style: dashed; border-color: color-mix(in srgb, var(--side) 50%, var(--line)); color: var(--side-ink); background: color-mix(in srgb, var(--side) 7%, var(--panel)); }
+.chip.side .ql { color: var(--side-ink); }
+.side-n, .side-n .ql { color: var(--side); }
+.ic-count .side-n { margin-left: 2px; font-weight: 500; }

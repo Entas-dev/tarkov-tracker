@@ -34,10 +34,15 @@ function buildIndexes() {
   const v2 = (D.gameReqs?.v || 1) >= 2;
   IX.vars = {};
   for (const [id, v] of Object.entries(V)) IX.vars[id] = { id, ...v, quests: [] };
+  const stType = (st = []) => (st.includes('active') ? 'accept' : st.includes('complete') ? 'complete' : st.includes('failed') ? 'fail' : 'complete');
   for (const q of Object.values(Q)) {
     const g = G[q.name];
     q.vars = [];
+    q.rep = [];
+    // not in the game files (and no event / seasonal-mode / Arena task the export leaves out): may not exist in your game
+    q.noGame = v2 && !g && !q.event && !q.mode && Object.keys(G).length > 100;
     if (!g) continue;
+    q.rep = (g.rep || []).map(([trader, cmp, value]) => ({ trader, cmp, value }));
     if (v2) {
       // since patch 1.1 the game files are the reliable source for level / loyalty requirements –
       // many wiki pages still show the old ones (e.g. "level 30" for Small Things, Big Help)
@@ -46,22 +51,35 @@ function buildIndexes() {
       for (const [id, min] of g.vars || []) { const info = IX.vars[id]; if (!info) continue; q.vars.push({ v: id, min, trader: info.trader, tier: info.tier, group: info.groups.indexOf(min) }); info.quests.push(q.name); }
       if (q.vars.length) { if (q.llWiki === undefined) q.llWiki = q.ll || null; q.ll = { trader: q.vars[0].trader, level: q.vars[0].tier, fromGame: true }; }
       else if (g.ll?.length) { if (q.llWiki === undefined) q.llWiki = q.ll || null; q.ll = { trader: g.ll[0][0], level: g.ll[0][1], fromGame: true }; }
+      else if (q.ll) { if (q.llWiki === undefined) q.llWiki = q.ll; q.ll = null; } // the game has no loyalty requirement (e.g. All This Filth… at Jaeger LL1)
     } else if (!q.minLevel && g.lvl) q.minLevel = g.lvl;
-    if (v2 && (g.req || []).every(r => Q[r.q])) {
+    const allReq = [...(g.req || []), ...(g.alts || []).flat()];
+    if (v2 && allReq.every(r => Q[r.q])) {
       // Since patch 1.1 most side tasks unlock through loyalty groups instead of a previous quest. The game files list
       // the real previous quests – wiki "previous" / "leads to" links the game does not have are outdated and would
       // make ticking a quest also tick quests you never did. (Only when every game prerequisite exists on the wiki –
       // otherwise the game data points at renamed / removed quests and the wiki links stay.)
-      const gst = new Map((g.req || []).map(r => [r.q, r.st || []]));
+      const gst = new Map(allReq.map(r => [r.q, r.st || []]));
       q.preWiki = q.pre;
       q.pre = q.pre.map(gr => gr.filter(a => gst.has(a.q)).map(a => { const st = gst.get(a.q); return { ...a, type: st.includes('active') ? 'accept' : st.includes('failed') && !st.includes('complete') ? 'fail' : 'complete' }; })).filter(gr => gr.length);
     }
-    for (const r of g.req || []) {
+    if (g.alts) {
+      // one wiki page for several game tasks with the same name: finishing any variant's chain unlocks it
+      const opts = g.alts.map(rs => rs.find(r => Q[r.q] && r.q !== q.name)).filter(Boolean);
+      if (opts.length && !opts.every(r => q.pre.some(gr => gr.some(a => a.q === r.q)))) { q.pre = q.pre.filter(gr => !gr.some(a => opts.some(r => r.q === a.q))); q.pre.push(opts.map(r => ({ q: r.q, type: stType(r.st), fromGame: true }))); }
+    } else for (const r of g.req || []) {
       if (!Q[r.q] || r.q === q.name || q.pre.some(gr => gr.some(a => a.q === r.q))) continue;
-      const st = r.st || [];
-      const type = st.includes('active') ? 'accept' : st.includes('complete') ? 'complete' : st.includes('failed') ? 'fail' : 'complete';
-      q.pre.push([{ q: r.q, type, fromGame: true }]);
+      q.pre.push([{ q: r.q, type: stType(r.st), fromGame: true, ...(r.via ? { via: r.via } : {}) }]);
     }
+  }
+  // tasks you only get after an event: losing standing with a trader (Make Amends, Compensation for Damage), failing
+  // a task, or a limited-time event – they never unlock through normal progress
+  for (const q of Object.values(Q)) {
+    const why = [];
+    if (q.event) why.push('Event task – only during its event');
+    for (const r of q.rep) if (r.cmp === '<' || r.cmp === '<=') why.push(`Only after your ${r.trader} reputation dropped to ${r.cmp === '<' ? 'below ' : ''}${r.value}${r.trader === 'Lightkeeper' ? ' (DSP transmitter decoded)' : ''}`);
+    if (q.pre.some(gr => gr.length && gr.every(a => a.type === 'fail'))) why.push('Only if you failed the task before it');
+    q.cond = why.length ? why.join(' · ') : null;
   }
   // cycles (the game files contain two tasks called "Make Amends", so the chain would point back at itself):
   // quests on a cycle keep their wiki links; game-only links that still close a cycle are dropped
@@ -76,6 +94,9 @@ function buildIndexes() {
     return hit;
   };
   let cyc = cycles();
+  // a game link to a task name the game uses several times ("Make Amends") points at the variant one step earlier
+  if (cyc.size) for (const n of cyc) Q[n].pre = Q[n].pre.map(g => g.flatMap(a => (a.fromGame && a.via?.length && cyc.has(a.q) ? a.via.filter(v => Q[v] && v !== n).map(v => ({ q: v, type: a.type, fromGame: true })) : [a]))).filter(g => g.length);
+  cyc = cycles();
   if (cyc.size) {
     for (const n of cyc) if (Q[n].preWiki) Q[n].pre = Q[n].preWiki.map(g => g.slice());
     cyc = cycles();
@@ -231,6 +252,13 @@ function buildIndexes() {
 
   // hideout
   IX.modules = Object.fromEntries(D.hideout.modules.map(m => [m.name, m]));
+  // levels a game edition comes with ("Owning "Edge of Darkness" or "The Unheard" game edition" → Stash 4)
+  IX.edHideout = {};
+  for (const m of D.hideout.modules) for (const L of m.levels) {
+    const txt = (L.other || []).join(' ').replace(/&quot;/g, '"');
+    if (!/owning .*edition/i.test(txt)) continue;
+    for (const [ed, re] of Object.entries(ED_RE)) if (re.test(txt)) { const e = (IX.edHideout[m.name] = IX.edHideout[m.name] || {}); e[ed] = Math.max(e[ed] || 0, L.level); }
+  }
 
   // chapters order
   const CH = D.chapters;
@@ -291,6 +319,25 @@ export function traderLL(trader, p = P()) {
 // Only real ticks count: finished tasks of that trader LL, or a quest of the group that you ticked as done / open
 // (proof that the game's counter reached its threshold). No estimates from your loyalty level.
 const tierOf = (q) => (q.vars?.length ? q.vars[0].tier : q.ll?.level || 1);
+
+// ---------- focus: Story + Kappa (+ Lightkeeper when it is your goal) ----------
+// Story chapters are their own entries in Speedrun / In-Raid; quests count when Kappa (Collector and every chain
+// before its required tasks) or – if picked as a goal – Lightkeeper needs them. Everything else is a side quest.
+export function focusQuests(p = P()) {
+  const lk = !!p.settings.goal?.lightkeeper;
+  return lk ? new Set([...IX.kappa, ...(IX.lightkeeper || [])]) : IX.kappa;
+}
+// loyalty-group counters (trader + LL) that still hold back a focus quest: any finished task at that LL helps
+export function focusGates(p = P(), focus = focusQuests(p)) {
+  const gates = new Set();
+  for (const n of focus) {
+    const q = D.quests[n];
+    if (!q || isDone(n, p) || !visible(q, p)) continue;
+    for (const x of q.vars || []) if (varValue(x.v, p) < x.min) gates.add(`${x.trader}|${x.tier}`);
+  }
+  return gates;
+}
+export const helpsFocus = (q, gates) => gates.has(`${q.trader}|${tierOf(q)}`);
 export function varInfo(id, p = P()) {
   const info = IX.vars?.[id];
   if (!info) return null;
@@ -336,11 +383,22 @@ function acceptable(q, p) {
   try { return questStatus(q, p).s === 'available'; } finally { accDepth--; }
 }
 
+// reputation requirement (Fence = Scav karma): null = you have not entered yours
+export function repMet(r, p = P()) {
+  const v = p.settings.rep?.[r.trader];
+  if (v == null || v === '') return null;
+  const x = +v;
+  return r.cmp === '>=' ? x >= r.value : r.cmp === '>' ? x > r.value : r.cmp === '<=' ? x <= r.value : r.cmp === '<' ? x < r.value : x === r.value;
+}
 export function questStatus(q, p = P()) {
   if (isDone(q.name, p)) return { s: 'done', reasons: [] };
   if (p.active?.[q.name]) return { s: 'available', reasons: [], active: true }; // you told us it is open in your game
   if (q.alts?.length && q.alts.some(a => isDone(a, p))) return { s: 'blocked', reasons: [{ k: 'alt', v: q.alts.filter(a => isDone(a, p)) }] };
+  // you entered your full task list and this one was not in it (finished or not unlocked – you decide)
+  if (p.notOpen?.[q.name]) return { s: 'locked', reasons: [{ k: 'notopen', why: p.notOpen[q.name] }] };
   const reasons = [];
+  if (q.cond && !q.rep.some(r => (r.cmp === '<' || r.cmp === '<=') && repMet(r, p))) reasons.push({ k: 'cond', why: q.cond });
+  for (const r of q.rep) if ((r.cmp === '>=' || r.cmp === '>') && repMet(r, p) !== true) reasons.push({ k: 'rep', r, unknown: repMet(r, p) == null });
   for (const g of preOf(q)) if (!groupSatisfied(g, p)) reasons.push({ k: 'pre', g });
   if (q.minLevel && p.settings.level < q.minLevel) reasons.push({ k: 'level', v: q.minLevel });
   if (q.ll && q.ll.trader && traderLL(q.ll.trader, p) < q.ll.level) reasons.push({ k: 'll', v: q.ll });
@@ -421,9 +479,9 @@ export function tourStepsFor(names, p = P()) {
 // opts.done: quests you saw as "Completed" (e.g. on a screenshot) – kept done, with everything before them.
 // Works on any profile object (the setup preview runs it on a copy).
 export function computeActiveApply(p, mode = 'merge', { noOpen = [], done = [] } = {}) {
-  const info = { level: null, strict: 0, ll: [], closure: [], strictList: [], capped: [], choice: [], tour: 0 };
+  const info = { level: null, strict: 0, ll: [], closure: [], strictList: [], capped: [], choice: [], unsure: [], tour: 0, noTicks: [] };
   p.active = p.active || {};
-  if (mode === 'replace' || mode === 'strict') { p.quests = {}; p.autoBy = {}; }
+  if (mode === 'replace' || mode === 'strict') { p.quests = {}; p.autoBy = {}; p.notOpen = {}; }
   const act = Object.keys(p.active).filter(n => D.quests[n]);
   for (const n of act) delete p.quests[n];
   const fin = done.filter(n => D.quests[n] && !p.active[n]);
@@ -444,7 +502,9 @@ export function computeActiveApply(p, mode = 'merge', { noOpen = [], done = [] }
   for (const id of tourIds) p.chObj[`Tour|${id}`] = 1;
   info.tour = tourIds.length;
   if (mode === 'strict') {
-    const traders = new Set([...act.map(n => D.quests[n].trader), ...noOpen]);
+    // your full task list covers every trader: one without a ticked quest has nothing open
+    const traders = new Set(IX.traders);
+    info.noTicks = IX.traders.filter(t => !act.some(n => D.quests[n].trader === t) && (IX.byTrader[t] || []).some(n => visible(D.quests[n], p)));
     // loyalty groups you have open quests in: groups above the highest open one are locked, not finished
     const cap = {};
     for (const n of act) for (const x of D.quests[n].vars || []) cap[x.v] = Math.max(cap[x.v] || 0, x.min);
@@ -453,7 +513,7 @@ export function computeActiveApply(p, mode = 'merge', { noOpen = [], done = [] }
       for (const n of IX.order) {
         const q = D.quests[n];
         if (p.quests[n] || p.active[n] || !traders.has(q.trader) || !visible(q, p)) continue;
-        if (q.alts?.length || isPrestigeQuest(n)) continue; // either-or choices / prestige: absence proves nothing
+        if (unsureWhy(q, p)) continue; // either-or choices, prestige, Scav karma, tasks missing from the game files: absence proves nothing
         if ((q.vars || []).some(x => cap[x.v] != null && x.min > cap[x.v])) continue;
         if (questStatus(q, p).s !== 'available') continue;
         p.quests[n] = 1; changed++; info.strict++; info.strictList.push(n);
@@ -461,13 +521,29 @@ export function computeActiveApply(p, mode = 'merge', { noOpen = [], done = [] }
       if (!changed) break;
     }
     // unlocked in the tracker, but in a loyalty group above your open quests: finished or still locked – can't tell
-    const left = IX.order.filter(n => { const q = D.quests[n]; return !p.quests[n] && !p.active[n] && traders.has(q.trader) && visible(q, p) && !isPrestigeQuest(n) && questStatus(q, p).s === 'available'; });
+    // what is still "available" but not in your list can't be open: finished or not unlocked – you can tell, the list can't
+    const left = IX.order.filter(n => { const q = D.quests[n]; return !p.quests[n] && !p.active[n] && visible(q, p) && questStatus(q, p).s === 'available'; });
     info.choice = left.filter(n => D.quests[n].alts?.length); // you did one of them – or none yet
     info.capped = left.filter(n => !D.quests[n].alts?.length && (D.quests[n].vars || []).some(x => cap[x.v] != null && x.min > cap[x.v]));
+    info.unsure = left.filter(n => !info.choice.includes(n) && !info.capped.includes(n)).map(n => ({ n, why: unsureWhy(D.quests[n], p) || 'Not in your task list' }));
+    for (const n of info.choice) p.notOpen[n] = 'Either-or quest – you did this one or the other';
+    for (const n of info.capped) p.notOpen[n] = 'Higher loyalty group – finished, or unlocks after more finished tasks at this LL';
+    for (const u of info.unsure) p.notOpen[u.n] = u.why;
+    p.settings.fullList = 2; // applied as a complete task list with this logic
   }
   return info;
 }
 export const isPrestigeQuest = (n) => /\(Prestige \d+\)$/.test(n);
+// why "not in your task list" does not prove a quest is finished
+export function unsureWhy(q, p = P()) {
+  if (q.alts?.length) return 'Either-or quest';
+  if (isPrestigeQuest(q.name)) return 'Prestige task';
+  const rp = q.rep.filter(r => (r.cmp === '>=' || r.cmp === '>') && repMet(r, p) !== true);
+  if (rp.length) return `Needs ${rp.map(r => `${r.trader} reputation ${r.value}`).join(', ')} – finished, or your reputation is too low`;
+  if (q.trader === 'Fence' && !q.rep.length && /karma/i.test((q.reqHtml || []).map(r => r.html).join(' '))) return 'Needs Scav karma – finished, or your karma is too low';
+  if (q.noGame) return 'Not in the game-file export (Arena task, renamed or brand new) – the tracker can\'t check it';
+  return null;
+}
 export function applyActiveQuests(mode = 'merge', opts = {}) {
   let info = null;
   store.update(p => { info = computeActiveApply(p, mode, opts); }, 'progress', `Open quests applied (${mode === 'strict' ? 'full task list' : mode === 'replace' ? 'only what they require' : 'kept ticks'})`);
@@ -527,6 +603,7 @@ export function completeQuest(name) {
     for (const n of add) { p.quests[n] = 1; p.autoBy[n] = name; }
     for (const id of tourIds) { p.chObj[`Tour|${id}`] = 1; p.autoBy[`Tour|${id}`] = name; }
     if (p.active) { delete p.active[name]; for (const n of add) delete p.active[n]; }
+    if (p.notOpen) { delete p.notOpen[name]; for (const n of add) delete p.notOpen[n]; }
   }, 'progress', add.length ? `${name} done (+${add.length} earlier quest${add.length > 1 ? 's' : ''} auto-checked)` : `${name} done`);
   return add.length;
 }
@@ -608,7 +685,13 @@ export function questNeeds(q, p = P(), { includeOptional = false } = {}) {
 }
 
 // ---------- hideout ----------
-export const hLevel = (mod, p = P()) => p.hideout[mod] || 0;
+export const EDITIONS = [['std', 'Standard'], ['lb', 'Left Behind'], ['pfe', 'Prepare for Escape'], ['eod', 'Edge of Darkness'], ['unheard', 'The Unheard']];
+const ED_RE = { std: /\bstandard\b/i, lb: /left behind/i, pfe: /prepare for escape/i, eod: /edge of darkness/i, unheard: /the unheard/i };
+export const editionOf = (p = P()) => p.settings.edition || (p.settings.unheard ? 'unheard' : p.settings.eod ? 'eod' : 'std');
+export const editionName = (p = P()) => (EDITIONS.find(e => e[0] === editionOf(p)) || EDITIONS[0])[1];
+// built level that comes with your game edition (no construction, so nothing it would require is built either)
+export const editionLevel = (mod, p = P()) => IX.edHideout?.[mod]?.[editionOf(p)] || 0;
+export const hLevel = (mod, p = P()) => Math.max(p.hideout?.[mod] || 0, editionLevel(mod, p));
 export function moduleMax(mod) { return IX.modules[mod]?.levels.length || 0; }
 export function levelReqStatus(mod, level, p = P()) {
   const L = IX.modules[mod]?.levels.find(l => l.level === level);
@@ -618,26 +701,28 @@ export function levelReqStatus(mod, level, p = P()) {
   for (const r of L.traders) if (traderLL(r.name, p) < r.level) missing.push({ k: 'trader', ...r });
   return { ok: !missing.length, missing, L };
 }
-export function hideoutClosure(mod, level) {
-  // returns {module: requiredLevel} to set for building mod up to level
+export function hideoutClosure(mod, level, p = P()) {
+  // returns {module: requiredLevel} to set for building mod up to level (levels your edition includes need nothing)
   const want = {};
   const walk = (m, lv) => {
     if ((want[m] || 0) >= lv) return;
     want[m] = lv;
-    for (const L of IX.modules[m]?.levels || []) if (L.level <= lv) for (const r of L.modules) walk(r.name, r.level);
+    const ed = editionLevel(m, p);
+    for (const L of IX.modules[m]?.levels || []) if (L.level <= lv && L.level > ed) for (const r of L.modules) walk(r.name, r.level);
   };
   walk(mod, level);
   return want;
 }
 export function setModuleLevel(mod, level) {
   const want = hideoutClosure(mod, level);
-  store.update(p => { for (const [m, lv] of Object.entries(want)) if (m === mod) p.hideout[m] = lv; else if ((p.hideout[m] || 0) < lv) p.hideout[m] = lv; });
+  store.update(p => { for (const [m, lv] of Object.entries(want)) if (m === mod) p.hideout[m] = lv; else if (hLevel(m, p) < lv) p.hideout[m] = lv; });
 }
 export function hideoutDependents(mod, newLevel, p = P()) {
   const out = [];
   for (const m of D.hideout.modules) {
     const built = hLevel(m.name, p);
-    for (const L of m.levels) if (L.level <= built) for (const r of L.modules) if (r.name === mod && r.level > newLevel) { out.push({ module: m.name, level: L.level - 1 }); }
+    const ed = editionLevel(m.name, p);
+    for (const L of m.levels) if (L.level <= built && L.level > ed) for (const r of L.modules) if (r.name === mod && r.level > newLevel) { out.push({ module: m.name, level: L.level - 1 }); }
   }
   // take min level per module
   const map = {};
@@ -759,7 +844,7 @@ export function storyHideout(ending = P().settings.ending || 'Savior', p = P()) 
       const m = (o.text || '').match(re);
       if (!m) continue;
       const mod = mods.find(x => x.toLowerCase() === m[1].toLowerCase());
-      for (const [k, lv] of Object.entries(hideoutClosure(mod, +m[2]))) want[k] = Math.max(want[k] || 0, lv);
+      for (const [k, lv] of Object.entries(hideoutClosure(mod, +m[2], p))) want[k] = Math.max(want[k] || 0, lv);
     }
   }
   return want; // {module: level}
