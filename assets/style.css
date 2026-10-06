@@ -709,6 +709,13 @@ input[type=number], input[type=search], select { background: var(--bg2); border-
 .td-badges:empty { display: none; }
 .td > .seasonal-box { margin: 8px 14px; }
 .td-sec { padding: 0 14px; margin-top: 14px; }
+.gs-shots { display: grid; gap: 10px; max-width: 760px; }
+.qc-body .gs-shots { margin: 8px 0; }
+.gs-shot { margin: 0; }
+.gs-shot a { display: block; border: 1px solid var(--line2); border-radius: 6px; overflow: hidden; background: #000; }
+.gs-img { display: block; width: 100%; height: auto; }
+.gs-shot a:hover .gs-img { opacity: .9; }
+.gs-shot figcaption { margin-top: 4px; }
 .td-sec h3 { display: flex; gap: 8px; align-items: baseline; font-size: 18px; padding-bottom: 4px; margin-bottom: 8px; border-bottom: 1px solid var(--line2); }
 .td-sec h3 .muted { font-size: 15px; }
 .td-req { display: grid; gap: 4px; background: var(--box); border-left: 3px solid var(--box-line); padding: 8px 10px; }
@@ -810,6 +817,8 @@ input[type=number], input[type=search], select { background: var(--bg2); border-
 .sr-story { display: grid; gap: 4px; }
 .sr-blocked { list-style: none; padding: 0; margin: 0; display: grid; gap: 4px; }
 .sr-blocked li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 5px 8px; background: var(--box); border-left: 3px solid #c9433c; }
+.sr-si li { border-left-color: #c9a43c; }
+.sr-items .chips + .raid-side-h { margin-top: 10px; }
 /* ---------- Needed items: all at once ---------- */
 .ig-t.p2 { border-color: color-mix(in srgb, #6fa0c8 70%, transparent); }
 .ig-leg { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin: 0 0 6px; }

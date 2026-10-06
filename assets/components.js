@@ -53,6 +53,13 @@ export function needsBlock(q, { chapter = false, ending = null } = {}) {
   return `<div class="needs"><div class="sub-h">Items</div><div class="chips">${needs.map(n => itemChip(n.item, { count: n.count, have: n.have, fir: n.fir, optional: n.optional, counter: (chapter ? 'ch:' : '') + cntKey(q.name, n.item) })).join('')}</div></div>`;
 }
 
+// Gunsmith: the finished weapon from the wiki's "Modding Screen" tab (one per weapon on multi-weapon tasks)
+export function gunsmithShots(q) {
+  const bs = (q.builds || []).filter(b => b.img);
+  if (!bs.length) return '';
+  return `<div class="gs-shots">${bs.map(b => `<figure class="gs-shot"><a href="${attr(b.imgFull || b.img)}" target="_blank" rel="noopener" data-tip="Open full size">${img(b.img, `${q.name}${b.label ? ' – ' + b.label : ''}: finished weapon`, 'gs-img')}</a><figcaption class="small muted">${b.label ? `<b>${esc(b.label)}</b> · ` : ''}Example build from the wiki (modding screen) – any build that meets the specs counts</figcaption></figure>`).join('')}</div>`;
+}
+
 export function questCard(q, { showTrader = true } = {}) {
   const p = P();
   const st = questStatus(q, p);
@@ -72,7 +79,7 @@ export function questCard(q, { showTrader = true } = {}) {
       <button class="ibtn" data-act="info" data-q="${attr(q.name)}" aria-label="Info: where and how" data-tip="Details, locations &amp; guide">${icon('info')}</button>
       <button class="ibtn chev ${open ? 'rot' : ''}" data-act="expand" data-q="${attr(q.name)}" aria-label="Expand">${icon('chevron')}</button>
     </div>
-    ${open ? `<div class="qc-body">${seasonal}${objectiveRows(q)}${needsBlock(q)}
+    ${open ? `<div class="qc-body">${seasonal}${objectiveRows(q)}${gunsmithShots(q)}${needsBlock(q)}
       ${q.rewardsHtml.length ? `<details class="rew"><summary>Rewards</summary><ul>${q.rewardsHtml.map(r => `<li>${r.html}${r.sub.length ? `<ul>${r.sub.map(s => `<li>${s}</li>`).join('')}</ul>` : ''}</li>`).join('')}</ul></details>` : ''}
       ${q.leadsTo.length ? `<div class="leads">Leads to: ${q.leadsTo.map(n => qlink(n)).join(', ')}</div>` : ''}
     </div>` : ''}
@@ -135,6 +142,7 @@ export function openQuestInfo(name) {
     ${isSeasonal() && q.seasonal?.length ? `<div class="seasonal-box">${icon('flag')}<div>${q.seasonal.map(s => `<div>${s.html}</div>`).join('')}</div></div>` : ''}
     <div class="sub-h">Requirements</div><ul class="plain">${reqs.map(r => `<li>${r}</li>`).join('') || '<li class="muted">None</li>'}</ul>
     <div class="sub-h">Objectives</div>${objectiveRows(q)}
+    ${gunsmithShots(q) ? `<div class="sub-h">Finished weapon</div>${gunsmithShots(q)}` : ''}
     ${needsBlock(q)}
     ${qi}
     ${q.rewardsHtml.length ? `<div class="sub-h">Rewards</div><ul class="plain">${q.rewardsHtml.map(r => `<li>${r.html}</li>`).join('')}</ul>` : ''}

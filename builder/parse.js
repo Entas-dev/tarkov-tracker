@@ -167,6 +167,23 @@ export function parseBuilds(body) {
     }
     if (parts.length) out.push({ parts });
   }
+  // finished weapon: the "Modding Screen" tab of each build ("M700 Modding Screen", "PP-19-01 Mod. Screen" on pages
+  // with several weapons) – in the same order as the shopping lists
+  const shots = buildTabs(body).filter(t => /\bmod(ding|\.)?\s*screen\s*$/i.test(t.name)).map(t => ({ label: t.name.replace(/\s*\bmod(ding|\.)?\s*screen\s*$/i, '').trim(), file: files(t.body)[0]?.file || null })).filter(s => s.file);
+  if (shots.length === out.length) shots.forEach((s, i) => { out[i].image = s.file; if (s.label) out[i].label = s.label; });
+  else if (shots.length && out.length) out[0].image = shots[0].file;
+  return out;
+}
+// tabs of <tabber> blocks: "Name=" right after <tabber>, then "|-|Name=" – body up to the next tab / </tabber>
+function buildTabs(body) {
+  const out = [];
+  for (const m of String(body || '').matchAll(/<tabber>([\s\S]*?)<\/tabber>/gi)) {
+    const parts = m[1].split(/^\|-\|/m);
+    for (const p of parts) {
+      const t = p.match(/^\s*([^=\n{|[<]+?)\s*=([\s\S]*)$/);
+      if (t) out.push({ name: t[1].trim(), body: t[2] });
+    }
+  }
   return out;
 }
 

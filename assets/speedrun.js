@@ -1,7 +1,7 @@
 // Speedrun planner: simulates your progression raid by raid and bundles every quest objective
 // (all traders + all story chapters) that can be done on the same map into one raid.
 import { store } from './store.js';
-import { D, IX, P, visible, questStatus, isDone, mapUnlocked, traderUnlocked, traderLL, varNeed, condStatus, hLevel, focusQuests, focusGates, helpsFocus } from './model.js';
+import { D, IX, P, mode, visible, questStatus, isDone, mapUnlocked, traderUnlocked, traderLL, varNeed, condStatus, hLevel, focusQuests, focusGates, helpsFocus } from './model.js';
 import { esc, attr, icon, img, traderImg, qlink, itemChip, fmt, progressBar } from './ui.js';
 import { openPanel } from './components.js';
 import { lootData, ensureLoot, lootState, neededLoot, lootForMap, whereText, itemImg, lootItem, bestMaps, mapDisplayName } from './loot.js';
@@ -28,10 +28,16 @@ function objType(q, o) {
   }
   if (maps.length) return 'raid';
   // eliminate / extract / … "on any location": needs a raid, just not a particular map
-  return RAID_KINDS.has(o.kind) ? 'any' : 'menu';
+  if (RAID_KINDS.has(o.kind)) return 'any';
+  // "Shoot a target from over 40 m", "Gain the Fatigue status effect" – in a raid; hand-ins / "Return to the hideout" are not
+  if (o.kind === 'other' && !/^(hand ?over|return|do not|don't)\b/i.test(o.text || '')) return 'any';
+  return 'menu';
 }
 const IN_RAID = new Set(['raid', 'any', 'flex']);
-const hasChildren = (list, o) => list.some(x => x.parent === o.id);
+// work outside a raid that only you can do: hand over / find items, build a weapon, sell … ("Do not kill X" and talking
+// to the trader need nothing)
+const outsideWork = (q, o) => !IN_RAID.has(objType(q, o)) && o.kind !== 'talk' && !/^(do not|don't|without)\b/i.test(o.text || '');
+const reqObjs = (q) => q.objectives.filter(o => !o.optional && !hasReqKids(q.objectives, o));
 // a quest objective whose sub-steps are all optional is itself the thing to do ("Mark any ATM" + optional locations)
 const hasReqKids = (list, o) => list.some(x => x.parent === o.id && !x.optional);
 const levelFor = (exp) => { let l = 1; for (const r of D.expTable || []) if (exp >= r.total) l = r.level; return l; };
@@ -72,6 +78,9 @@ export function chapterStarted(c, sp) {
 }
 function chMap(c, o) {
   if (o.maps?.length) return o.maps[0];
+  // a step whose sub-steps are all optional ("Locate the traces …" + optional spots on several maps): where they are
+  const kids = c.objectives.filter(x => x.parent === o.id);
+  if (kids.length && kids.every(x => x.optional)) { const k = kids.find(x => x.maps?.length); if (k) return k.maps[0]; }
   if (c.name !== 'Tour' || !(RAID_KINDS.has(o.kind) || o.kind === 'find' || o.kind === 'other')) return null;
   // Tour objectives without a map link inherit the map of the next mapped step (e.g. the Terminal intercom → Shoreline)
   const i = c.objectives.indexOf(o);
@@ -80,15 +89,30 @@ function chMap(c, o) {
 }
 const MODS = () => D.hideout.modules.map(m => m.name);
 const MENU_TXT = /^(\(optional\)\s*)?(learn|find out|ask|talk|tell|report|wait|figure out|decide|choose|read|hand over|pay|give|return to the hideout|return to)/i;
-// 'parent' | 'menu' (done at a trader / hideout) | 'raid' (on a map) | 'block' (hideout level / loyalty still missing) | 'unmapped' (in raid, map unknown)
+// hand-in of things you may not have yet (found-in-raid items, money, dogtags …) – not the story item picked up in an
+// earlier step ("Hand over the flash drive to Prapor")
+function chNeedsItems(c, o) {
+  if (!(o.kind === 'handover' || /^hand over/i.test(o.text || ''))) return false;
+  if (o.fir || /found in raid/i.test(o.text || '')) return true;
+  const before = c.objectives.slice(0, c.objectives.indexOf(o));
+  return (o.items || []).some(i => !D.items[i.item]?.questItem && !before.some(x => (x.items || []).some(j => j.item === i.item)));
+}
+// 'parent' | 'menu' (done at a trader / hideout) | 'items' (hand-in of items you may not have) | 'raid' (on a map) |
+// 'block' (hideout level / loyalty still missing) | 'unmapped' (in raid, map unknown)
 function chStepType(c, o, sp) {
-  if (hasChildren(c.objectives, o)) return 'parent';
+  const kids = c.objectives.filter(x => x.parent === o.id);
+  if (kids.some(x => !x.optional)) return 'parent';
   const t = o.text || '';
   const hm = t.match(new RegExp(`(${MODS().join('|')})\\s*level\\s*(\\d)`, 'i'));
   if (hm && /obtain|build|construct|upgrade|reach/i.test(t)) { const mod = MODS().find(m => m.toLowerCase() === hm[1].toLowerCase()); return hLevel(mod, sp) >= +hm[2] ? 'menu' : 'block'; }
   const lm = t.match(/Loyalty Level (\d) with (\w[\w ]*)/i);
   if (lm) { const tr = Object.keys(D.traders).find(x => lm[2].toLowerCase().startsWith(x.toLowerCase())); return tr && traderLL(tr, sp) >= +lm[1] ? 'menu' : 'block'; }
-  if (MENU_KINDS.has(o.kind) || MENU_TXT.test(t)) return 'menu';
+  // only optional sub-steps ("Find out what Kozlov was involved in" + optional "Access Kozlov's room"): the step happens
+  // where they happen
+  if (kids.length && !MENU_KINDS.has(o.kind) && kids.some(x => ['raid', 'unmapped'].includes(chStepType(c, x, sp)))) return chMap(c, o) ? 'raid' : 'unmapped';
+  if (chNeedsItems(c, o)) return 'items';
+  // "Read the note on Kozlov's door" is read in the raid, "Read the transcript …" in your stash
+  if (MENU_KINDS.has(o.kind) || (MENU_TXT.test(t) && !/^read\b.*\b(on|in)\b/i.test(t))) return 'menu';
   if (chMap(c, o)) return 'raid';
   if (RAID_KINDS.has(o.kind) || o.kind === 'find' || o.kind === 'other') return 'unmapped';
   return 'menu';
@@ -105,7 +129,9 @@ function chapterNext(c, sp) {
   return out;
 }
 
-// Complete everything that needs no raid: story talk/hand-in steps, quest hand-ins, finished quests.
+// Complete what happens at the traders without anything from you: story talk/hand-in steps and quests whose objectives are
+// all done. Quests that still need items / a weapon build are NOT assumed (you may not have the items) – except quests
+// whose raid part the plan itself just finished (sp._raided): those are handed in after that raid, items included.
 function autoAdvance(sp, log) {
   let changed = true, guard = 0;
   while (changed && guard++ < 60) {
@@ -120,23 +146,24 @@ function autoAdvance(sp, log) {
           continue;
         }
         if (t === 'raid') break;
+        if (t === 'items') { if (log?.storyItems && !log.storyItems.some(b => b.c === cn)) log.storyItems.push({ c: cn, o }); break; }
         if (t === 'block' || t === 'unmapped') { if (log?.blocked && !log.blocked.some(b => b.c === cn)) log.blocked.push({ c: cn, o, t }); break; }
         sp.chObj[`${cn}|${o.id}`] = 1; changed = true;
         log?.story.push({ c: cn, o });
       }
       if (c.objectives.every(o => o.optional || !applies(o, sp) || chDoneIn(sp, cn, o.id))) { sp.ch[cn] = 1; changed = true; }
     }
-    // quests: when every raid objective is done, the rest happens at the trader
+    // quests: every raid objective done → hand it in (items too, if the plan finished its raid part)
     for (const n of IX.order) {
       const q = D.quests[n];
       if (sp.quests[n] || !visible(q, sp) || karmaQuest(q)) continue;
       if (questStatus(q, sp).s !== 'available') continue;
-      const req = q.objectives.filter(o => !o.optional && !hasReqKids(q.objectives, o));
-      const raidLeft = req.filter(o => IN_RAID.has(objType(q, o)) && !objDoneIn(sp, n, o.id));
-      if (raidLeft.length) continue;
-      const lootLeft = req.filter(o => objType(q, o) === 'loot' && !objDoneIn(sp, n, o.id));
+      const left = reqObjs(q).filter(o => !objDoneIn(sp, n, o.id));
+      if (left.some(o => IN_RAID.has(objType(q, o)))) continue;
+      const items = left.some(o => outsideWork(q, o));
+      if (items && !sp._raided?.has(n)) continue;
       sp.quests[n] = 1; changed = true;
-      if (lootLeft.length) log?.loot.push(n); else log?.done.push(n);
+      if (items) log?.loot.push(n); else log?.done.push(n);
     }
   }
 }
@@ -220,15 +247,31 @@ function lootBonusFn(needs) {
   };
 }
 
+// open quests (available now) with nothing left to do in a raid – only items to find / hand over, a weapon to build, …
+// They're not part of the raid plan: you hand them in whenever you have the items.
+export function itemQuests(p) {
+  const out = [];
+  for (const n of IX.order) {
+    const q = D.quests[n];
+    if (isDone(n, p) || !visible(q, p) || karmaQuest(q) || questStatus(q, p).s !== 'available') continue;
+    const left = reqObjs(q).filter(o => !objDoneIn(p, n, o.id));
+    if (!left.length || left.some(o => IN_RAID.has(objType(q, o))) || !left.some(o => outsideWork(q, o))) continue;
+    out.push(n);
+  }
+  return out;
+}
+
 const ekey = (e) => (e.kind === 'ch' ? `C${e.c}|${e.o.id}` : e.kind === 'start' ? `S${e.c}` : `${e.q.name}|${e.o.id}`);
 export function planRaids({ maxRaids = 10, expPerRaid = 4000, lootNeeds = null } = {}) {
   const base = P();
   const lootBonus = lootBonusFn(lootNeeds);
   const sp = cloneProfile(base);
+  sp._raided = new Set();
   let exp = expFor(sp.settings.level);
   const raids = [];
-  const pre = { story: [], done: [], loot: [], blocked: [] };
+  const pre = { story: [], done: [], loot: [], blocked: [], storyItems: [] };
   autoAdvance(sp, pre);
+  pre.items = itemQuests(base);
   const focus = focusQuests(base);
   for (let r = 0; r < maxRaids; r++) {
     const fx = { focus, gates: focusGates(sp, focus) };
@@ -248,16 +291,17 @@ export function planRaids({ maxRaids = 10, expPerRaid = 4000, lootNeeds = null }
     for (const e of entries) {
       if (e.kind === 'ch') sp.chObj[`${e.c}|${e.o.id}`] = 1;
       else if (e.kind === 'start') sp.chStart[e.c] = 1;
-      else sp.obj[`${e.q.name}|${e.o.id}`] = 1;
+      else { sp.obj[`${e.q.name}|${e.o.id}`] = 1; sp._raided.add(e.q.name); }
     }
-    const log = { story: [], done: [], loot: [], blocked: [] };
+    const log = { story: [], done: [], loot: [], blocked: [], storyItems: [] };
     autoAdvance(sp, log);
     // EXP only for quests actually finished through raid objectives – item/menu-only quests are assumed but not credited
     const hasRaidObj = (n) => { const q = D.quests[n]; return q.objectives.some(o => !o.optional && IN_RAID.has(objType(q, o))); };
-    const gained = log.done.filter(hasRaidObj).reduce((s, n) => s + (D.quests[n].exp || 0), 0) + expPerRaid;
+    const gained = [...log.done, ...log.loot].filter(hasRaidObj).reduce((s, n) => s + (D.quests[n].exp || 0), 0) + expPerRaid;
     if (expPerRaid > 0) { exp += gained; sp.settings.level = Math.max(sp.settings.level, levelFor(exp)); }
     raids.push({ map: best, entries, turnIns: log.done, lootQuests: log.loot, storyAfter: log.story, level: levelBefore, levelAfter: sp.settings.level, score: bestScore });
     for (const b of log.blocked) if (!pre.blocked.some(x => x.c === b.c)) pre.blocked.push({ ...b, after: r + 1 });
+    for (const b of log.storyItems) if (!pre.storyItems.some(x => x.c === b.c)) pre.storyItems.push({ ...b, after: r + 1 });
   }
   // loot to collect for quests that are (or become) available in the plan
   const loot = {};
@@ -295,7 +339,7 @@ function bringList(r) {
 }
 
 // ---------- stored plan (only recalculated on request) ----------
-const PLAN_V = 4;
+const PLAN_V = 5;
 function progressSig(p) {
   const keys = (o) => Object.keys(o || {}).filter(k => o[k]).sort().join(',');
   const str = [keys(p.quests), keys(p.obj), keys(p.ch), keys(p.chObj), keys(p.chStart), keys(p.active), JSON.stringify(p.hideout || {}), p.settings.level].join('|');
@@ -308,7 +352,7 @@ const serS = (x) => [x.c, x.o.id];
 function serializePlan(plan) {
   return {
     raids: plan.raids.map(r => ({ map: r.map, e: r.entries.map(serE), t: r.turnIns, l: r.lootQuests || [], sa: r.storyAfter.map(serS), lv: r.level, la: r.levelAfter })),
-    pre: { story: plan.prelude.story.map(serS), done: plan.prelude.done, loot: plan.prelude.loot, blocked: plan.prelude.blocked.map(b => [b.c, b.o.id, b.t, b.after || 0]) },
+    pre: { story: plan.prelude.story.map(serS), done: plan.prelude.done, items: plan.prelude.items || [], si: (plan.prelude.storyItems || []).map(b => [b.c, b.o.id, b.after || 0]), blocked: plan.prelude.blocked.map(b => [b.c, b.o.id, b.t, b.after || 0]) },
     loot: plan.loot,
   };
 }
@@ -320,7 +364,7 @@ function hydratePlan(d) {
   const he = (a) => (a[0] === 'C' ? (cobj(a[1], a[2]) ? { kind: 'ch', c: a[1], o: cobj(a[1], a[2]) } : null) : a[0] === 'S' ? (D.chapters[a[1]] ? { kind: 'start', c: a[1] } : null) : (qobj(a[0], a[1]) ? { kind: 'quest', q: D.quests[a[0]], o: qobj(a[0], a[1]) } : null));
   return {
     raids: d.raids.map(r => ({ map: r.map, entries: r.e.map(he).filter(Boolean), turnIns: r.t.filter(q), lootQuests: r.l.filter(q), storyAfter: r.sa.map(hs).filter(Boolean), level: r.lv, levelAfter: r.la })).filter(r => r.entries.length),
-    prelude: { story: d.pre.story.map(hs).filter(Boolean), done: d.pre.done.filter(q), loot: d.pre.loot.filter(q), blocked: d.pre.blocked.map(([c, id, t, after]) => (cobj(c, id) ? { c, o: cobj(c, id), t, after } : null)).filter(Boolean) },
+    prelude: { story: d.pre.story.map(hs).filter(Boolean), done: d.pre.done.filter(q), loot: [], items: (d.pre.items || []).filter(q), storyItems: (d.pre.si || []).map(([c, id, after]) => (cobj(c, id) ? { c, o: cobj(c, id), after } : null)).filter(Boolean), blocked: d.pre.blocked.map(([c, id, t, after]) => (cobj(c, id) ? { c, o: cobj(c, id), t, after } : null)).filter(Boolean) },
     loot: (d.loot || []).filter(a => D.items[a.item]),
   };
 }
@@ -359,6 +403,7 @@ export function renderSpeedrun(root) {
   // quests that the plan works on count as "soon" for item priorities
   const soon = new Set();
   for (const r of plan.raids) { for (const e of r.entries) if (e.q) soon.add(e.q.name); r.turnIns.forEach(n => soon.add(n)); (r.lootQuests || []).forEach(n => soon.add(n)); }
+  (plan.prelude.items || []).forEach(n => soon.add(n));
   plan.loot.forEach(a => a.quests.forEach(n => soon.add(n)));
   const needs = ld ? neededLoot(p, soon) : [];
   const raidLoot = plan.raids.map(r => (ld ? lootForMap(r.map, needs) : []));
@@ -381,11 +426,10 @@ export function renderSpeedrun(root) {
   ${Object.keys(p.active || {}).some(n => p.active[n] && D.quests[n]) && p.settings.fullList !== 2 ? `<div class="notice">${icon('refresh')}<div>Your open quests were entered with an older version. <b>Apply them once more</b> (Set my open quests → Apply – this is my full task list): then only they count as available and quests you can't have leave the plan. <button class="btn btn-s btn-p" data-act="active-setup">Open</button></div></div>` : ''}
   ${(() => { const no = Object.keys(p.notOpen || {}).filter(n => p.notOpen[n] && D.quests[n] && !isDone(n, p) && !p.active?.[n] && visible(D.quests[n], p)); return no.length ? `<div class="notice">${icon('info')}<div><b>${no.length}</b> quest${no.length > 1 ? 's' : ''} that were not in your task list stay out of the plan (finished or not unlocked yet – the list can't tell). <button class="btn btn-s" data-act="active-setup">Resolve them</button></div></div>` : ''; })()}
   ${stale ? `<div class="notice sr-stale">${icon('refresh')}<div>Your progress changed since this plan was made. Ticks show up here, but the raid order stays as it is until you press <b>Recalculate</b>. <button class="btn btn-s btn-p" data-act="sr-recalc">Recalculate now</button></div></div>` : ''}
-  ${pr.story.length || pr.done.length || pr.loot.length || pr.blocked.length ? `<section class="panel sr-pre"><div class="panel-h"><h2>Right now, before your next raid</h2></div>
+  ${pr.story.length || pr.done.length ? `<section class="panel sr-pre"><div class="panel-h"><h2>Right now, before your next raid</h2><span class="small muted">only trader visits – nothing here needs items you don't have</span></div>
     ${pr.story.length ? `<div class="sub-h">Story steps at the traders</div><div class="sr-story">${storySteps(pr.story)}</div>` : ''}
-    ${pr.loot.length ? `<div class="sub-h">Collect the items and hand in</div><div class="chips">${qChips(pr.loot, p)}</div>` : ''}
-    ${pr.done.length ? `<div class="sub-h">Quests you can hand in</div><div class="chips">${qChips(pr.done, p)}</div>` : ''}
-    ${pr.blocked.length ? `<div class="sub-h">Story steps the plan can't place on a map</div><ul class="sr-blocked">${pr.blocked.map(b => `<li>${chIcon(b.c)} <b>${esc(b.c)}</b>: ${b.o.html} <span class="small muted">${b.t === 'block' ? '– needs a hideout level / trader loyalty first' : '– location not on the wiki page, see the guide'}${b.after ? ` (reached after raid ${b.after})` : ''}</span> <button class="btn btn-s" data-act="info-ch" data-c="${attr(b.c)}">${icon('info')} Guide</button></li>`).join('')}</ul>` : ''}</section>` : ''}
+    ${pr.done.length ? `<div class="sub-h">Ready to hand in <span class="small muted">– every objective is ticked</span></div><div class="chips">${qChips(pr.done, p)}</div>` : ''}
+    </section>` : ''}
   <ol class="raids">${plan.raids.map((r, i) => {
     const chE = r.entries.filter(e => e.kind === 'ch');
     const startE = r.entries.filter(e => e.kind === 'start');
@@ -405,11 +449,34 @@ export function renderSpeedrun(root) {
       ${lt.length ? `<div class="raid-loot"><div class="raid-lh">${icon('box')} <span class="small"><b>Grab on ${esc(r.map)}</b> – items you still need for quests / hideout that spawn here</span></div>
         ${ltTop.length ? `<div class="chips">${ltTop.map(x => lootChip(x, r.map)).join('')}</div>` : ''}
         ${ltRest.length ? `<details class="raid-more"><summary class="small">${ltTop.length ? 'More' : 'Items for later'} (${ltRest.length})</summary><div class="chips">${ltRest.map(x => lootChip(x, r.map)).join('')}</div></details>` : ''}</div>` : ''}
-      ${r.turnIns.length || r.storyAfter.length || r.lootQuests?.length ? `<div class="raid-after"><span class="small muted">After the raid:</span> ${storySteps(r.storyAfter)} ${r.turnIns.length ? `<span class="small">hand in ${qNames(r.turnIns, p)}</span>` : ''}${r.lootQuests?.length ? ` <span class="small">· unlocked item quests: ${qNames(r.lootQuests, p)}</span>` : ''}</div>` : ''}
+      ${r.turnIns.length || r.storyAfter.length || r.lootQuests?.length ? `<div class="raid-after"><span class="small muted">After the raid:</span> ${storySteps(r.storyAfter)} ${r.turnIns.length ? `<span class="small">hand in ${qNames(r.turnIns, p)}</span>` : ''}${r.lootQuests?.length ? ` <span class="small" data-tip="The raid part is done after this raid – they also need items (see the loot plan). The plan assumes you hand them in now.">${r.turnIns.length ? '· ' : ''}hand in once you have the items: ${qNames(r.lootQuests, p)}</span>` : ''}</div>` : ''}
     </li>`;
   }).join('') || '<div class="empty">Nothing to plan – every available quest objective is done, or the next quests need a higher level / trader loyalty.</div>'}</ol>
+  ${pr.blocked.length ? `<section class="panel sr-blk"><div class="panel-h"><h2>Story steps the plan can't place</h2><span class="small muted">no map on the wiki page, or a hideout level / trader loyalty is missing – check the guide and do them on the way</span></div><ul class="sr-blocked">${pr.blocked.map(b => `<li>${chIcon(b.c)} <b>${esc(b.c)}</b>: ${b.o.html} <span class="small muted">${b.t === 'block' ? '– needs a hideout level / trader loyalty first' : '– location not on the wiki page, see the guide'}${b.after ? ` (reached after raid ${b.after})` : ''}</span> <button class="btn btn-s" data-act="info-ch" data-c="${attr(b.c)}">${icon('info')} Guide</button></li>`).join('')}</ul></section>` : ''}
+  ${itemQuestsHtml(pr.items || [], pr.storyItems || [], p)}
   ${lootPlanHtml(plan, needs, raidLoot, ld)}
   <p class="small muted">How it's planned: from your ticked progress the planner simulates raid by raid. Each raid picks the map where you get the most done: storyline starts count most (so you pick up every storyline as early as possible), then story steps, then quest objectives – an objective that is possible on several maps counts less than one that only works on this map, and objectives that finish a quest count extra. After each raid it hands in finished quests and estimates your level from quest EXP plus the EXP-per-raid setting. When two maps are about equal, the one where more of your needed items can spawn wins. Item spawns: loose-loot spots and container positions from tarkov.dev, container contents from the wiki loot tables. Computed in ${ms} ms.</p>`;
+}
+
+// open quests without a raid part: not in the raid plan, hand them in whenever you have the items
+function itemQuestsHtml(names, storyItems, p) {
+  const list = names.filter(n => D.quests[n] && !isDone(n, p));
+  const si = storyItems.filter(b => !p.ch[b.c] && !p.chObj[`${b.c}|${b.o.id}`]);
+  if (!list.length && !si.length) return '';
+  const f = focusQuests(p);
+  const dep = IX.graph[mode()]?.dep || IX.graph.normal.dep;
+  const what = (q) => { const left = reqObjs(q).filter(o => !objDoneIn(p, q.name, o.id) && outsideWork(q, o)); return left.some(o => o.kind === 'build') ? 'weapon build' : left.some(o => o.kind === 'sell') ? 'sell items' : 'items'; };
+  const chip = (n) => {
+    const q = D.quests[n];
+    const nx = [...(dep[n] || [])].filter(x => D.quests[x] && visible(D.quests[x], p));
+    const raidDone = reqObjs(q).some(o => IN_RAID.has(objType(q, o)));
+    return `<span class="chip ${f.has(n) ? '' : 'side'}" data-tip="${attr(`${raidDone ? 'Raid part done – ' : ''}needs ${what(q)}${nx.length ? ` · unlocks ${nx.join(', ')}` : ''}`)}">${traderImg(q.trader, 'chip-img')}${qlink(n)} <span class="small muted">${what(q)}${nx.length ? ` · unlocks ${nx.length}` : ''}</span></span>`;
+  };
+  const fo = list.filter(n => f.has(n)), so = list.filter(n => !f.has(n));
+  return `<section class="panel sr-items"><div class="panel-h"><h2>Item hand-ins – no raid needed</h2><span class="small muted">Hand them in whenever you have the items – they're not part of the raid plan. What comes after them joins the plan once you tick them and press Recalculate.</span></div>
+    ${si.length ? `<div class="sub-h">Story</div><ul class="sr-blocked sr-si">${si.map(b => `<li><button class="cb cb-s" data-act="chobj" data-q="${attr(b.c)}" data-o="${b.o.id}" aria-label="Tick">${icon('check')}</button>${chIcon(b.c)} <b>${esc(b.c)}</b>: ${b.o.html}${b.after ? ` <span class="small muted">(reached after raid ${b.after})</span>` : ''}</li>`).join('')}</ul>` : ''}
+    ${fo.length ? `<div class="sub-h">Quests – open now</div><div class="chips">${fo.map(chip).join('')}</div>` : ''}
+    ${so.length ? `<div class="raid-side-h"><span>Side quests</span> <span class="small">open now · not needed for Story / Kappa${p.settings.goal?.lightkeeper ? ' / Lightkeeper' : ''}</span></div><div class="chips">${so.map(chip).join('')}</div>` : ''}</section>`;
 }
 
 // ---------- shared raid blocks (Speedrun cards + In-Raid view) ----------
@@ -496,7 +563,7 @@ export function mapTodo(map, { bosses = null } = {}) {
 function notYet(n, p) {
   const st = questStatus(D.quests[n], p);
   if (st.s !== 'locked') return '';
-  const why = st.reasons.map(r => r.k === 'var' ? `after ${varNeed(r.x, p)} more finished ${r.x.trader} LL${r.x.tier} task${varNeed(r.x, p) > 1 ? 's' : ''} (e.g. the hand-ins before this raid)` : r.k === 'level' ? `at PMC level ${r.v}` : r.k === 'll' ? `at ${r.v.trader} LL${r.v.level}` : r.k === 'pre' ? `after ${r.g.map(a => a.q).join(' or ')}` : r.k === 'tour' || r.k === 'start' ? 'after the Tour steps' : r.k === 'map' ? 'when the map is unlocked' : r.k === 'chapter' ? `after the ${r.c.ch} step` : r.k === 'rep' ? `at ${r.r.trader} reputation ${r.r.value}` : '').filter(Boolean);
+  const why = st.reasons.map(r => r.k === 'var' ? `after ${varNeed(r.x, p)} more finished ${r.x.trader} LL${r.x.tier} task${varNeed(r.x, p) > 1 ? 's' : ''} (earlier hand-ins in the plan)` : r.k === 'level' ? `at PMC level ${r.v}` : r.k === 'll' ? `at ${r.v.trader} LL${r.v.level}` : r.k === 'pre' ? `after ${r.g.map(a => a.q).join(' or ')}` : r.k === 'tour' || r.k === 'start' ? 'after the Tour steps' : r.k === 'map' ? 'when the map is unlocked' : r.k === 'chapter' ? `after the ${r.c.ch} step` : r.k === 'rep' ? `at ${r.r.trader} reputation ${r.r.value}` : '').filter(Boolean);
   return `<span class="badge b-lock" data-tip="${attr('Not in your task list yet – unlocks ' + (why.join(', ') || 'during the plan') + '. Hand in the earlier quests first.')}">${icon('lock')}unlocks first</span>`;
 }
 

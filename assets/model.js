@@ -79,6 +79,8 @@ function buildIndexes() {
     if (q.event) why.push('Event task – only during its event');
     for (const r of q.rep) if (r.cmp === '<' || r.cmp === '<=') why.push(`Only after your ${r.trader} reputation dropped to ${r.cmp === '<' ? 'below ' : ''}${r.value}${r.trader === 'Lightkeeper' ? ' (DSP transmitter decoded)' : ''}`);
     if (q.pre.some(gr => gr.length && gr.every(a => a.type === 'fail'))) why.push('Only if you failed the task before it');
+    // Make Amends - Buyout / Security / Software: "Getting the DSP radio transmitter decoded the first time" (Lightkeeper)
+    if ((q.reqHtml || []).some(r => /transmitter decoded/i.test(String(r.html || '').replace(/<[^>]+>/g, '')))) why.push('Only after Lightkeeper decoded your DSP radio transmitter');
     q.cond = why.length ? why.join(' · ') : null;
   }
   // cycles (the game files contain two tasks called "Make Amends", so the chain would point back at itself):

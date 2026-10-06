@@ -2,7 +2,7 @@
 import { store } from './store.js';
 import { D, IX, P, visible, questStatus, isDone, questObjProgress, questNeeds, traderLL, traderUnlocked, questMapsUnlocked, preOf, groupSatisfied, varNeed, varText, llNote, chReqMet, isSeasonal } from './model.js';
 import { esc, attr, icon, img, traderImg, qlink, itemChip, fmt } from './ui.js';
-import { objectiveRows, needsBlock, questBadges } from './components.js';
+import { objectiveRows, needsBlock, questBadges, gunsmithShots } from './components.js';
 
 const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V'];
 // quests without a loyalty level unlock through task chains / the story, not through a trader LL (patch 1.1)
@@ -181,6 +181,7 @@ export function taskDetail(q, id = '') {
     ${isSeasonal() && q.seasonal?.length ? `<div class="seasonal-box">${icon('flag')}<div>${q.seasonal.map(s => `<div>${s.html}</div>`).join('')}</div></div>` : ''}
     ${req.length ? `<section class="td-sec"><h3>Requirements</h3><div class="td-req">${req.map(r => `<div class="tt-req">${r.replace(/^(<span class="t-(?:ok|no|dot)">[\s\S]*?<\/span>)\s*([\s\S]*)$/, '$1<span>$2</span>')}</div>`).join('')}</div></section>` : ''}
     <section class="td-sec"><h3>Objectives <span class="muted">${pr.done}/${pr.total}</span></h3>${objectiveRows(q)}</section>
+    ${gunsmithShots(q) ? `<section class="td-sec"><h3>Finished weapon</h3>${gunsmithShots(q)}</section>` : ''}
     ${needs.length ? needsBlock(q).replace('<div class="sub-h">Items</div>', '<h3>Items</h3>').replace('class="needs"', 'class="needs td-sec"') : ''}
     ${q.rewardsHtml?.length ? `<section class="td-sec"><h3>Rewards</h3><ul class="td-rew">${q.rewardsHtml.map(r => `<li>${r.html}${r.sub.length ? `<ul>${r.sub.map(x => `<li>${x}</li>`).join('')}</ul>` : ''}</li>`).join('')}</ul></section>` : ''}
     ${q.leadsTo?.length ? `<section class="td-sec"><h3>Leads to</h3><div class="td-next">${q.leadsTo.map(n => D.quests[n] ? `<button class="ts-mini" data-act="ts-sel" data-id="${attr(id)}" data-q="${attr(n)}" data-tip-q="${attr(n)}">${typeIcon(taskType(D.quests[n]))}${esc(n)}</button>` : qlink(n)).join('')}</div></section>` : ''}

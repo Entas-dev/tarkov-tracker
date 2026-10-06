@@ -191,6 +191,15 @@ export async function buildDataset({ wiki = new Wiki(), log = console.log, progr
     const res = await wiki.imageUrls([...set], +w);
     for (const [f, v] of Object.entries(res)) images[f] = v.thumb;
   }
+  // Gunsmith: screenshot of the finished weapon (modding screen) – a large thumbnail plus the original for zooming
+  const shots = [...new Set(Object.values(quests).flatMap(q => (q.builds || []).map(b => b.image).filter(Boolean)))];
+  if (shots.length) {
+    const res = await wiki.imageUrls(shots, 960);
+    for (const q of Object.values(quests)) for (const b of q.builds || []) {
+      const r = b.image && res[b.image];
+      if (r) { b.img = r.thumb; b.imgFull = r.url; }
+    }
+  }
   // fallback item icons via "<Name> icon.png" for items without infobox icon
   const noIcon = Object.values(items).filter(i => !i.icon || !images[i.icon]);
   if (noIcon.length) {

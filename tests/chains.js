@@ -97,10 +97,10 @@
           const now = (m) => M.questStatus(D.quests[m], p).s === 'available';
           const others = (plan.raids[0]?.entries || []).filter(e => e.kind === 'quest' && e.q.name !== n && now(e.q.name)).map(e => e.q.name);
           if (others.length) problems.push(`B ${profile} ${n}: Speedrun raid 1 has quests you can't have: ${[...new Set(others)].slice(0, 5).join(', ')}`);
-          // "hand in right now" only for quests without anything left to do in a raid
-          const RAID = new Set(['kill', 'visit', 'mark', 'place', 'extract', 'use']);
-          const pre = plan.prelude.done.filter(m => D.quests[m].objectives.some(o => !o.optional && RAID.has(o.kind) && !p.obj[m + '|' + o.id]));
-          if (pre.length) problems.push(`B ${profile} ${n}: Speedrun says "hand in now" for quests that still need a raid: ${pre.slice(0, 5).join(', ')}`);
+          // "ready to hand in" only when every objective is ticked (talking / "do not …" need nothing); item quests only if open now
+          const leaf = (q, o) => !o.optional && !q.objectives.some(x => x.parent === o.id && !x.optional);
+          const pre = [...plan.prelude.done.filter(m => D.quests[m].objectives.some(o => leaf(D.quests[m], o) && o.kind !== 'talk' && !/^(do not|don't|without)\b/i.test(o.text || '') && !p.obj[m + '|' + o.id])), ...(plan.prelude.items || []).filter(m => M.questStatus(D.quests[m], p).s !== 'available').map(m => m + ' (item quest not open)')];
+          if (pre.length) problems.push(`B ${profile} ${n}: Speedrun says "hand in now" for quests that still need a raid or items: ${pre.slice(0, 5).join(', ')}`);
         } finally { for (const k of Object.keys(real)) delete real[k]; Object.assign(real, saved); }
       }
     }

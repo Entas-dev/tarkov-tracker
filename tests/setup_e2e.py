@@ -122,7 +122,9 @@ async def main():
           const now = (n) => M.questStatus(D.quests[n]).s === 'available';
           const r1 = (plan.raids[0]?.entries || []).filter(e => e.kind === 'quest' && !act.includes(e.q.name) && now(e.q.name)).map(e => e.q.name);
           const RAID = new Set(['kill', 'visit', 'mark', 'place', 'extract', 'use']);
-          const handin = plan.prelude.done.filter(m => D.quests[m].objectives.some(o => !o.optional && RAID.has(o.kind) && !p.obj[m + '|' + o.id]));
+          // "ready to hand in" only when every objective is ticked (talking / "do not …" need nothing); item quests only if open now
+          const leaf = (q, o) => !o.optional && !q.objectives.some(x => x.parent === o.id && !x.optional);
+          const handin = [...plan.prelude.done.filter(m => D.quests[m].objectives.some(o => leaf(D.quests[m], o) && o.kind !== 'talk' && !/^(do not|don't|without)\\b/i.test(o.text || '') && !p.obj[m + '|' + o.id])), ...(plan.prelude.items || []).filter(m => M.questStatus(D.quests[m], p).s !== 'available').map(m => m + ' (item quest not open)')];
           return { extra, r1, handin, raids: plan.raids.length };
         }""")
         print(f"available but not open: {chk['extra'][:8]} | Speedrun raid 1 extra: {chk['r1'][:6]} | 'hand in now' with raid work left: {chk['handin'][:6]} | {chk['raids']} raids planned")
